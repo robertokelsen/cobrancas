@@ -6,6 +6,8 @@ WORKDIR /app
 COPY package.json package-lock.json* ./
 RUN npm install
 COPY . .
+# garante que a pasta public exista mesmo se nao houver assets
+RUN mkdir -p public
 # invalida o cache da camada de build a cada novo CACHEBUST
 RUN echo "build $CACHEBUST" && npm run build
 
