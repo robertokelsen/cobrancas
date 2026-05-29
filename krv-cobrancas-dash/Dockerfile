@@ -1,17 +1,19 @@
 # ---- build ----
 FROM node:20-alpine AS builder
+# CACHE-BUST: 20260529123759  (altere este valor sempre que quiser forçar rebuild limpo)
+ARG CACHEBUST=20260529123759
 WORKDIR /app
 COPY package.json package-lock.json* ./
 RUN npm install
 COPY . .
-RUN npm run build
+# invalida o cache da camada de build a cada novo CACHEBUST
+RUN echo "build $CACHEBUST" && npm run build
 
 # ---- runtime (standalone enxuto) ----
 FROM node:20-alpine AS runner
 WORKDIR /app
 ENV NODE_ENV=production
 ENV PORT=3000
-# Next standalone copia só o necessário
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
 COPY --from=builder /app/public ./public
