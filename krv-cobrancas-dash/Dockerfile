@@ -1,7 +1,7 @@
 # ---- build ----
 FROM node:20-alpine AS builder
-# CACHE-BUST: 20260529123759  (altere este valor sempre que quiser forçar rebuild limpo)
-ARG CACHEBUST=20260529123759
+# CACHE-BUST: 20260529130506  (altere para forçar rebuild limpo)
+ARG CACHEBUST=20260529130506
 WORKDIR /app
 COPY package.json package-lock.json* ./
 RUN npm install
