@@ -1,0 +1,209 @@
+{
+  "name": "KRV — Enviar Boleto WhatsApp (Mansões do Lago)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "krv-boletos/360597122/enviar-boleto",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "wh-env-001",
+      "name": "🔔 Webhook Enviar",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [0, 300],
+      "webhookId": "env-bol-0001"
+    },
+    {
+      "parameters": {
+        "assignments": { "assignments": [
+          { "id": "b", "name": "baseUrl", "value": "https://cdpj.partners.bancointer.com.br", "type": "string" },
+          { "id": "i", "name": "instancia", "value": "krvengenharia", "type": "string" }
+        ] },
+        "options": {}
+      },
+      "id": "cfg-env-001",
+      "name": "🔐 Config Env",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [220, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const wh=$('🔔 Webhook Enviar').first().json;\nconst b=wh.body!==undefined?wh.body:wh;\nconst ev=(b&&typeof b==='object')?b:{};\nconst id=ev.id||'';\nconst conta=ev.conta||'360597122';\nlet enviar=ev.enviar;\nif(typeof enviar==='string')enviar=[enviar];\nif(!Array.isArray(enviar)||enviar.length===0)enviar=['pdf','pix','linha'];\nif(!id)throw new Error('id ausente no payload');\nreturn [{json:{id,conta,enviar,wantPdf:enviar.includes('pdf'),wantPix:enviar.includes('pix'),wantLinha:enviar.includes('linha')}}];"
+      },
+      "id": "parse-env-001",
+      "name": "🧩 Parse",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [440, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('🔐 Config Env').item.json.baseUrl }}/oauth/v2/token",
+        "provideSslCertificates": true,
+        "sendBody": true,
+        "contentType": "form-urlencoded",
+        "bodyParameters": { "parameters": [
+          { "name": "client_id", "value": "={{ $env.INTER_CLIENT_ID }}" },
+          { "name": "client_secret", "value": "={{ $env.INTER_CLIENT_SECRET }}" },
+          { "name": "scope", "value": "boleto-cobranca.read boleto-cobranca.write" },
+          { "name": "grant_type", "value": "client_credentials" }
+        ] },
+        "options": {}
+      },
+      "id": "token-env-001",
+      "name": "🔑 Token (Env)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [660, 300],
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 5000,
+      "credentials": { "httpSslAuth": { "id": "my0TT9OqXggUYKxB", "name": "KRV Engenharia - Inter 360597122" } }
+    },
+    {
+      "parameters": {
+        "url": "={{ $('🔐 Config Env').item.json.baseUrl }}/cobranca/v3/cobrancas/{{ $('🧩 Parse').item.json.id }}",
+        "provideSslCertificates": true,
+        "sendHeaders": true,
+        "headerParameters": { "parameters": [
+          { "name": "Authorization", "value": "=Bearer {{ $json.access_token }}" },
+          { "name": "x-conta-corrente", "value": "={{ $('🧩 Parse').item.json.conta }}" }
+        ] },
+        "options": {}
+      },
+      "id": "det-env-001",
+      "name": "🔍 Detalhar (Env)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [880, 300],
+      "retryOnFail": true,
+      "maxTries": 4,
+      "waitBetweenTries": 8000,
+      "credentials": { "httpSslAuth": { "id": "my0TT9OqXggUYKxB", "name": "KRV Engenharia - Inter 360597122" } }
+    },
+    {
+      "parameters": {
+        "jsCode": "const det=$('🔍 Detalhar (Env)').item.json;\nconst cob=det.cobranca||{};\nconst cfg=$('🧩 Parse').item.json;\nconst fmt=v=>Number(v||0).toLocaleString('pt-BR',{style:'currency',currency:'BRL'});\nconst dt=v=>v?String(v).slice(0,10).split('-').reverse().join('/'):'';\nconst nome=(cob.pagador&&cob.pagador.nome)?String(cob.pagador.nome).split(' ')[0]:'';\nconst tel=cob.pagador&&cob.pagador.telefone;\nconst jid=tel?'55'+String(tel).replace(/\\D/g,''):'';\nlet txt='Olá, '+nome+'! Segue sua fatura KRV Engenharia.\\n\\n💰 Valor: '+fmt(cob.valorNominal)+'\\n📅 Vencimento: '+dt(cob.dataVencimento);\nif(cfg.wantPix&&det.pix&&det.pix.pixCopiaECola){txt+='\\n\\n*PIX copia e cola:*\\n'+det.pix.pixCopiaECola;}\nif(cfg.wantLinha&&det.boleto&&det.boleto.linhaDigitavel){txt+='\\n\\n*Linha digitável:*\\n'+det.boleto.linhaDigitavel;}\ntxt+='\\n\\n_KRV Engenharia_';\nreturn [{json:{jid,texto:txt,nome,wantPdf:cfg.wantPdf,wantTexto:(cfg.wantPix||cfg.wantLinha)}}];"
+      },
+      "id": "msg-env-001",
+      "name": "🧱 Monta Mensagem",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1100, 300]
+    },
+    {
+      "parameters": {
+        "conditions": { "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "loose", "version": 2 },
+          "conditions": [ { "id": "t", "leftValue": "={{ $json.wantTexto }}", "rightValue": true, "operator": { "type": "boolean", "operation": "true", "singleValue": true } } ],
+          "combinator": "and" },
+        "options": {}
+      },
+      "id": "if-txt-001",
+      "name": "Quer PIX/Linha?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [1320, 200]
+    },
+    {
+      "parameters": {
+        "resource": "messages-api",
+        "instanceName": "={{ $('🔐 Config Env').item.json.instancia }}",
+        "remoteJid": "={{ $('🧱 Monta Mensagem').item.json.jid }}",
+        "messageText": "={{ $('🧱 Monta Mensagem').item.json.texto }}",
+        "options_message": {}
+      },
+      "id": "wpp-txt-001",
+      "name": "💬 Texto (PIX/Linha)",
+      "type": "n8n-nodes-evolution-api.evolutionApi",
+      "typeVersion": 1,
+      "position": [1540, 200],
+      "onError": "continueRegularOutput",
+      "credentials": { "evolutionApi": { "id": "lxkOvmBrxb4JpQsu", "name": "Evolution account" } }
+    },
+    {
+      "parameters": {
+        "conditions": { "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "loose", "version": 2 },
+          "conditions": [ { "id": "p", "leftValue": "={{ $json.wantPdf }}", "rightValue": true, "operator": { "type": "boolean", "operation": "true", "singleValue": true } } ],
+          "combinator": "and" },
+        "options": {}
+      },
+      "id": "if-pdf-001",
+      "name": "Quer PDF?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [1320, 420]
+    },
+    {
+      "parameters": {
+        "url": "={{ $('🔐 Config Env').item.json.baseUrl }}/cobranca/v3/cobrancas/{{ $('🧩 Parse').item.json.id }}/pdf",
+        "provideSslCertificates": true,
+        "sendHeaders": true,
+        "headerParameters": { "parameters": [
+          { "name": "Authorization", "value": "=Bearer {{ $('🔑 Token (Env)').item.json.access_token }}" },
+          { "name": "x-conta-corrente", "value": "={{ $('🧩 Parse').item.json.conta }}" }
+        ] },
+        "options": { "response": { "response": { "responseFormat": "file", "outputPropertyName": "data" } } }
+      },
+      "id": "pdf-env-001",
+      "name": "📄 PDF (Env)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1540, 420],
+      "onError": "continueRegularOutput",
+      "credentials": { "httpSslAuth": { "id": "my0TT9OqXggUYKxB", "name": "KRV Engenharia - Inter 360597122" } }
+    },
+    {
+      "parameters": {
+        "resource": "messages-api",
+        "operation": "send-document",
+        "instanceName": "={{ $('🔐 Config Env').item.json.instancia }}",
+        "remoteJid": "={{ $('🧱 Monta Mensagem').item.json.jid }}",
+        "media": "={{ $binary.data.data }}",
+        "caption": "=Boleto KRV — venc. {{ $('🔍 Detalhar (Env)').item.json.cobranca.dataVencimento }}",
+        "fileName": "Boleto-KRV.pdf",
+        "options_message": {}
+      },
+      "id": "wpp-pdf-001",
+      "name": "💬 Envia PDF",
+      "type": "n8n-nodes-evolution-api.evolutionApi",
+      "typeVersion": 1,
+      "position": [1760, 420],
+      "onError": "continueRegularOutput",
+      "credentials": { "evolutionApi": { "id": "lxkOvmBrxb4JpQsu", "name": "Evolution account" } }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={ \"ok\": true, \"mensagem\": \"Boleto enviado ao cliente.\" }",
+        "options": {}
+      },
+      "id": "resp-env-001",
+      "name": "✅ Resposta",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1980, 300]
+    }
+  ],
+  "connections": {
+    "🔔 Webhook Enviar": { "main": [[{ "node": "🔐 Config Env", "type": "main", "index": 0 }]] },
+    "🔐 Config Env": { "main": [[{ "node": "🧩 Parse", "type": "main", "index": 0 }]] },
+    "🧩 Parse": { "main": [[{ "node": "🔑 Token (Env)", "type": "main", "index": 0 }]] },
+    "🔑 Token (Env)": { "main": [[{ "node": "🔍 Detalhar (Env)", "type": "main", "index": 0 }]] },
+    "🔍 Detalhar (Env)": { "main": [[{ "node": "🧱 Monta Mensagem", "type": "main", "index": 0 }]] },
+    "🧱 Monta Mensagem": { "main": [[
+      { "node": "Quer PIX/Linha?", "type": "main", "index": 0 },
+      { "node": "Quer PDF?", "type": "main", "index": 0 }
+    ]] },
+    "Quer PIX/Linha?": { "main": [[{ "node": "💬 Texto (PIX/Linha)", "type": "main", "index": 0 }], []] },
+    "Quer PDF?": { "main": [[{ "node": "📄 PDF (Env)", "type": "main", "index": 0 }], []] },
+    "📄 PDF (Env)": { "main": [[{ "node": "💬 Envia PDF", "type": "main", "index": 0 }]] },
+    "💬 Envia PDF": { "main": [[{ "node": "✅ Resposta", "type": "main", "index": 0 }]] },
+    "💬 Texto (PIX/Linha)": { "main": [[{ "node": "✅ Resposta", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" },
+  "pinData": {}
+}
