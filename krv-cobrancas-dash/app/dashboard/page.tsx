@@ -11,8 +11,8 @@ const CONTAS = [
   { id: '360597122', nome: 'Mansões do Lago' },
   { id: '441915256', nome: 'Gran Royal' },
   { id: '319709051', nome: 'Royal Park' },
-  { id: '529462788', nome: 'Paço das Águas' },
   { id: '216584469', nome: 'Vivendas Pajuçara' },
+  { id: '529462788', nome: 'Paço das Águas' },
 ];
 const N8N_BASE = 'https://n8n.larke.com.br/webhook';
 
@@ -53,7 +53,7 @@ const CORES_PIE: Record<string, string> = {
 
 export default function Dashboard() {
   const router = useRouter();
-  const [conta, setConta] = useState(CONTAS[0].id);
+  const [contasSel, setContasSel] = useState<string[]>(CONTAS.map(c => c.id));
   const [situacoesSel, setSituacoesSel] = useState<string[]>([]);
   const [busca, setBusca] = useState('');
   const [buscaDeb, setBuscaDeb] = useState('');
@@ -83,7 +83,7 @@ export default function Dashboard() {
     setLoading(true); setErro('');
     try {
       const qs = new URLSearchParams({
-        conta, situacao: situacoesSel.join(','), busca: buscaDeb, mes,
+        conta: contasSel.join(','), situacao: situacoesSel.join(','), busca: buscaDeb, mes,
         page: String(page), pageSize: String(pageSize),
       });
       const res = await fetch(`/api/boletos?${qs}`);
@@ -94,7 +94,7 @@ export default function Dashboard() {
       setSerie(d.serieMensal || []); setMeses(d.mesesDisponiveis || []); setTotal(d.total || 0);
     } catch (e: any) { setErro('Falha ao carregar. ' + (e?.message || '')); }
     finally { setLoading(false); }
-  }, [conta, situacoesSel, buscaDeb, mes, page, router]);
+  }, [contasSel, situacoesSel, buscaDeb, mes, page, router]);
 
   useEffect(() => { carregar(); }, [carregar]);
 
@@ -102,6 +102,10 @@ export default function Dashboard() {
   const toggleSituacao = (s: string) => {
     setPage(1);
     setSituacoesSel((c) => c.includes(s) ? c.filter(x => x !== s) : [...c, s]);
+  };
+  const toggleConta = (id: string) => {
+    setPage(1);
+    setContasSel((c) => c.includes(id) ? c.filter(x => x !== id) : [...c, id]);
   };
   const podeCancelar = (s: string) => s === 'A_RECEBER' || s === 'ATRASADO';
   const cancelar = (b: Boleto) =>
@@ -162,6 +166,11 @@ export default function Dashboard() {
 
         {/* Métricas */}
         {metricas && (
+          <>
+          <div className="text-xs text-gray-400 mb-2">
+            {mes ? `Mostrando dados de ${fmtMes(mes)}` : 'Mostrando todos os meses'}
+            {contasSel.length < CONTAS.length ? ` · ${contasSel.length} de ${CONTAS.length} empreendimentos` : ' · todos os empreendimentos'}
+          </div>
           <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
             <Card t="A Receber" cor="text-blue-700" q={metricas.a_receber} v={metricas.valor_a_receber} />
             <Card t="Atrasados" cor="text-red-700" q={metricas.atrasado} v={metricas.valor_atrasado} />
@@ -175,6 +184,7 @@ export default function Dashboard() {
               <div className="text-xs text-gray-400 mt-1">do valor total</div>
             </div>
           </div>
+          </>
         )}
 
         {/* Gráficos */}
@@ -209,11 +219,25 @@ export default function Dashboard() {
         {/* Filtros */}
         <div className="bg-white rounded-xl shadow-sm p-4 mb-4">
           <div className="flex flex-wrap gap-3 items-end mb-3">
-            <div>
-              <label className="block text-xs text-gray-500 mb-1">Conta</label>
-              <select value={conta} onChange={(e) => { setConta(e.target.value); setPage(1); }} className="border rounded-lg px-3 py-2 text-sm">
-                {CONTAS.map((c) => <option key={c.id} value={c.id}>{c.nome}</option>)}
-              </select>
+            <div className="w-full">
+              <div className="flex items-center justify-between mb-1">
+                <label className="block text-xs text-gray-500">Empreendimentos (clique para filtrar; múltiplos)</label>
+                <div className="flex gap-2">
+                  <button onClick={() => { setContasSel(CONTAS.map(c => c.id)); setPage(1); }} className="text-xs text-indigo-600 hover:text-indigo-800">todos</button>
+                  <button onClick={() => { setContasSel([]); setPage(1); }} className="text-xs text-gray-400 hover:text-gray-600">nenhum</button>
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {CONTAS.map((c) => {
+                  const ativo = contasSel.includes(c.id);
+                  return (
+                    <button key={c.id} onClick={() => toggleConta(c.id)}
+                      className={`px-3 py-1.5 rounded-full text-xs font-medium border transition ${ativo ? 'bg-indigo-100 text-indigo-700 border-transparent' : 'bg-white text-gray-500 border-gray-200 hover:border-gray-300'}`}>
+                      {c.nome}{ativo ? ' ✓' : ''}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
             <div>
               <label className="block text-xs text-gray-500 mb-1">Mês de vencimento</label>
