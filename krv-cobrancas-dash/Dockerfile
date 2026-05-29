@@ -1,13 +1,11 @@
 # ---- build ----
 FROM node:20-alpine AS builder
-# CACHE-BUST: 20260529130506 (altere para forçar rebuild limpo)
-ARG CACHEBUST=20260529130506
+# CACHE-BUST: 20260529181345  (altere para forçar rebuild limpo)
+ARG CACHEBUST=20260529181345
 WORKDIR /app
 COPY package.json package-lock.json* ./
 RUN npm install
 COPY . .
-# garante que a pasta public exista (evita falha no COPY do runtime)
-RUN mkdir -p public
 # invalida o cache da camada de build a cada novo CACHEBUST
 RUN echo "build $CACHEBUST" && npm run build
 
