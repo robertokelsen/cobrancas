@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend,
-  PieChart, Pie, Cell, CartesianGrid,
+  PieChart, Pie, Cell, CartesianGrid, ComposedChart, Line,
 } from 'recharts';
 
 const CONTAS = [
@@ -25,10 +25,12 @@ type Boleto = {
   pix_copia_cola?: string | null; linha_digitavel?: string | null;
 };
 type Metricas = {
-  a_receber: number; atrasado: number; recebido: number; cancelado: number;
+  a_receber: number; atrasado: number; recebido: number;
   valor_a_receber: number; valor_atrasado: number; valor_recebido: number;
 };
-type SerieMes = { mes: string; recebido: number; atrasado: number; a_receber: number };
+type Pizza = { a_receber: number; atrasado: number; recebido: number };
+type SerieMes = { mes: string; recebido: number; atrasado: number; a_receber: number; inadimplencia: number };
+type SortKey = 'nome' | 'situacao' | 'vencimento' | 'valor' | 'data_ultima_notif' | 'conta';
 
 const SITUACOES = ['A_RECEBER', 'ATRASADO', 'RECEBIDO', 'CANCELADO'];
 const ITENS_ENVIO = [
@@ -36,6 +38,8 @@ const ITENS_ENVIO = [
   { k: 'pix', label: 'PIX copia e cola' },
   { k: 'linha', label: 'Linha digitável' },
 ];
+// situações em que ações de cobrança (PIX/Linha/Enviar/Cancelar) fazem sentido
+const ATIVO_COBRANCA = (s: string) => s === 'A_RECEBER' || s === 'ATRASADO';
 
 const brl = (v: number | null | undefined) =>
   (Number(v) || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', minimumFractionDigits: 2 });
@@ -43,12 +47,23 @@ const fmtData = (v: string | null) => v ? new Date(v).toLocaleDateString('pt-BR'
 const MESES_ABR = ['jan','fev','mar','abr','mai','jun','jul','ago','set','out','nov','dez'];
 const fmtMes = (m: string) => { const [a, mm] = m.split('-'); return `${MESES_ABR[parseInt(mm,10)-1]}/${a.slice(2)}`; };
 
+// estima valor atualizado de boleto atrasado: 2% multa + 1% a.m. de juros pro rata
+function valorAtualizado(valor: number | null, vencimento: string | null): number | null {
+  if (!valor || !vencimento) return null;
+  const venc = new Date(vencimento + 'T00:00:00Z').getTime();
+  const hoje = Date.now();
+  const diasAtraso = Math.max(0, Math.floor((hoje - venc) / 86400000));
+  if (diasAtraso === 0) return null;
+  const juros = 0.01 * (diasAtraso / 30); // 1% ao mês pro rata
+  return valor * (1 + 0.02 + juros);
+}
+
 const CORES: Record<string, string> = {
   A_RECEBER: 'bg-blue-100 text-blue-700', ATRASADO: 'bg-red-100 text-red-700',
   RECEBIDO: 'bg-green-100 text-green-700', CANCELADO: 'bg-gray-200 text-gray-600',
 };
 const CORES_PIE: Record<string, string> = {
-  A_RECEBER: '#3b82f6', ATRASADO: '#ef4444', RECEBIDO: '#22c55e', CANCELADO: '#9ca3af',
+  A_RECEBER: '#3b82f6', ATRASADO: '#ef4444', RECEBIDO: '#22c55e',
 };
 
 export default function Dashboard() {
@@ -61,10 +76,15 @@ export default function Dashboard() {
   const [page, setPage] = useState(1);
   const pageSize = 50;
 
+  const [sort, setSort] = useState<SortKey | ''>('');
+  const [dir, setDir] = useState<'asc' | 'desc'>('asc');
+
   const [boletos, setBoletos] = useState<Boleto[]>([]);
   const [metricas, setMetricas] = useState<Metricas | null>(null);
+  const [pizza, setPizza] = useState<Pizza | null>(null);
   const [serie, setSerie] = useState<SerieMes[]>([]);
   const [meses, setMeses] = useState<string[]>([]);
+  const [mesVigente, setMesVigente] = useState('');
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
   const [erro, setErro] = useState('');
@@ -86,15 +106,17 @@ export default function Dashboard() {
         conta: contasSel.join(','), situacao: situacoesSel.join(','), busca: buscaDeb, mes,
         page: String(page), pageSize: String(pageSize),
       });
+      if (sort) { qs.set('sort', sort); qs.set('dir', dir); }
       const res = await fetch(`/api/boletos?${qs}`);
       if (res.status === 401) { router.push('/login'); return; }
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const d = await res.json();
-      setBoletos(d.boletos || []); setMetricas(d.metricas || null);
-      setSerie(d.serieMensal || []); setMeses(d.mesesDisponiveis || []); setTotal(d.total || 0);
+      setBoletos(d.boletos || []); setMetricas(d.metricas || null); setPizza(d.pizza || null);
+      setSerie(d.serieMensal || []); setMeses(d.mesesDisponiveis || []);
+      setMesVigente(d.mesVigente || ''); setTotal(d.total || 0);
     } catch (e: any) { setErro('Falha ao carregar. ' + (e?.message || '')); }
     finally { setLoading(false); }
-  }, [contasSel, situacoesSel, buscaDeb, mes, page, router]);
+  }, [contasSel, situacoesSel, buscaDeb, mes, page, sort, dir, router]);
 
   useEffect(() => { carregar(); }, [carregar]);
 
@@ -107,6 +129,12 @@ export default function Dashboard() {
     setPage(1);
     setContasSel((c) => c.includes(id) ? c.filter(x => x !== id) : [...c, id]);
   };
+  const ordenar = (key: SortKey) => {
+    setPage(1);
+    if (sort === key) { setDir(d => d === 'asc' ? 'desc' : 'asc'); }
+    else { setSort(key); setDir('asc'); }
+  };
+  const setaSort = (key: SortKey) => sort === key ? (dir === 'asc' ? ' ▲' : ' ▼') : '';
   const podeCancelar = (s: string) => s === 'A_RECEBER' || s === 'ATRASADO';
   const cancelar = (b: Boleto) =>
     window.open(`${N8N_BASE}/krv-boletos/${b.conta}/cancelar?id=${encodeURIComponent(b.codigo_solicitacao)}`, '_blank', 'noopener');
@@ -139,14 +167,13 @@ export default function Dashboard() {
   }, [metricas]);
 
   const dadosPie = useMemo(() => {
-    if (!metricas) return [];
+    if (!pizza) return [];
     return [
-      { name: 'A_RECEBER', value: metricas.a_receber },
-      { name: 'ATRASADO', value: metricas.atrasado },
-      { name: 'RECEBIDO', value: metricas.recebido },
-      { name: 'CANCELADO', value: metricas.cancelado },
+      { name: 'A_RECEBER', value: pizza.a_receber },
+      { name: 'ATRASADO', value: pizza.atrasado },
+      { name: 'RECEBIDO', value: pizza.recebido },
     ].filter(d => d.value > 0);
-  }, [metricas]);
+  }, [pizza]);
 
   const serieFmt = useMemo(() => serie.map(s => ({ ...s, mesLabel: fmtMes(s.mes) })), [serie]);
 
@@ -171,11 +198,10 @@ export default function Dashboard() {
             {mes ? `Mostrando dados de ${fmtMes(mes)}` : 'Mostrando todos os meses'}
             {contasSel.length < CONTAS.length ? ` · ${contasSel.length} de ${CONTAS.length} empreendimentos` : ' · todos os empreendimentos'}
           </div>
-          <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
-            <Card t="A Receber" cor="text-blue-700" q={metricas.a_receber} v={metricas.valor_a_receber} />
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+            <Card t={`A Receber (${mesVigente ? fmtMes(mesVigente) : 'mês'})`} cor="text-blue-700" q={metricas.a_receber} v={metricas.valor_a_receber} />
             <Card t="Atrasados" cor="text-red-700" q={metricas.atrasado} v={metricas.valor_atrasado} />
             <Card t="Recebidos" cor="text-green-700" q={metricas.recebido} v={metricas.valor_recebido} />
-            <Card t="Cancelados" cor="text-gray-600" q={metricas.cancelado} v={null} />
             <div className="bg-white rounded-xl shadow-sm p-4">
               <div className="text-xs text-gray-500 mb-1">Inadimplência</div>
               <div className={`text-2xl font-bold ${inadimplencia > 20 ? 'text-red-600' : 'text-amber-600'}`}>
@@ -190,27 +216,30 @@ export default function Dashboard() {
         {/* Gráficos */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">
           <div className="bg-white rounded-xl shadow-sm p-4 lg:col-span-2">
-            <h3 className="text-sm font-medium text-gray-700 mb-3">Evolução mensal — Recebido vs Atrasado</h3>
+            <h3 className="text-sm font-medium text-gray-700 mb-3">Evolução mensal — Recebido vs Atrasado vs Inadimplência</h3>
             <ResponsiveContainer width="100%" height={240}>
-              <BarChart data={serieFmt}>
+              <ComposedChart data={serieFmt}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} />
                 <XAxis dataKey="mesLabel" fontSize={12} />
-                <YAxis fontSize={11} tickFormatter={(v) => v >= 1000 ? `${(v/1000).toFixed(0)}k` : String(v)} />
-                <Tooltip formatter={(v: any) => brl(v)} />
+                <YAxis yAxisId="left" fontSize={11} tickFormatter={(v) => v >= 1000 ? `${(v/1000).toFixed(0)}k` : String(v)} />
+                <YAxis yAxisId="right" orientation="right" fontSize={11} tickFormatter={(v) => `${v}%`} domain={[0, 100]} />
+                <Tooltip formatter={(v: any, n: any) => n === 'Inadimplência' ? `${v}%` : brl(v)} />
                 <Legend />
-                <Bar dataKey="recebido" name="Recebido" fill="#22c55e" radius={[4,4,0,0]} />
-                <Bar dataKey="atrasado" name="Atrasado" fill="#ef4444" radius={[4,4,0,0]} />
-              </BarChart>
+                <Bar yAxisId="left" dataKey="recebido" name="Recebido" fill="#22c55e" radius={[4,4,0,0]} />
+                <Bar yAxisId="left" dataKey="atrasado" name="Atrasado" fill="#ef4444" radius={[4,4,0,0]} />
+                <Line yAxisId="right" type="monotone" dataKey="inadimplencia" name="Inadimplência" stroke="#f59e0b" strokeWidth={2} dot={{ r: 3 }} />
+              </ComposedChart>
             </ResponsiveContainer>
           </div>
           <div className="bg-white rounded-xl shadow-sm p-4">
-            <h3 className="text-sm font-medium text-gray-700 mb-3">Distribuição por situação</h3>
-            <ResponsiveContainer width="100%" height={240}>
+            <h3 className="text-sm font-medium text-gray-700 mb-1">Distribuição por situação (R$)</h3>
+            <p className="text-xs text-gray-400 mb-2">{mesVigente ? fmtMes(mesVigente) : 'mês vigente'}</p>
+            <ResponsiveContainer width="100%" height={216}>
               <PieChart>
                 <Pie data={dadosPie} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={80} label={(e:any)=>e.name}>
                   {dadosPie.map((d) => <Cell key={d.name} fill={CORES_PIE[d.name] || '#999'} />)}
                 </Pie>
-                <Tooltip />
+                <Tooltip formatter={(v: any) => brl(v)} />
               </PieChart>
             </ResponsiveContainer>
           </div>
@@ -276,40 +305,50 @@ export default function Dashboard() {
         <div className="bg-white rounded-xl shadow-sm overflow-visible">
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
-              <thead className="bg-gray-50 text-gray-600 text-left">
+              <thead className="bg-gray-50 text-gray-600 text-left select-none">
                 <tr>
-                  <th className="px-4 py-3 font-medium">Cliente</th>
-                  <th className="px-4 py-3 font-medium">Situação</th>
-                  <th className="px-4 py-3 font-medium">Vencimento</th>
-                  <th className="px-4 py-3 font-medium text-right">Valor</th>
-                  <th className="px-4 py-3 font-medium">Última notif.</th>
+                  <Th onClick={() => ordenar('nome')} label={`Cliente${setaSort('nome')}`} />
+                  <Th onClick={() => ordenar('situacao')} label={`Situação${setaSort('situacao')}`} />
+                  <Th onClick={() => ordenar('vencimento')} label={`Vencimento${setaSort('vencimento')}`} />
+                  <Th onClick={() => ordenar('valor')} label={`Valor${setaSort('valor')}`} align="right" />
+                  <Th onClick={() => ordenar('data_ultima_notif')} label={`Última notif.${setaSort('data_ultima_notif')}`} />
                   <th className="px-4 py-3 font-medium text-right">Ações</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
                 {loading && <tr><td colSpan={6} className="px-4 py-8 text-center text-gray-400">Carregando...</td></tr>}
                 {!loading && boletos.length === 0 && <tr><td colSpan={6} className="px-4 py-8 text-center text-gray-400">Nenhum boleto encontrado.</td></tr>}
-                {!loading && boletos.map((b) => (
+                {!loading && boletos.map((b) => {
+                  const atualizado = b.situacao === 'ATRASADO' ? valorAtualizado(b.valor, b.vencimento) : null;
+                  return (
                   <tr key={b.codigo_solicitacao} className="hover:bg-gray-50">
                     <td className="px-4 py-3"><div className="font-medium text-gray-900">{b.nome || '—'}</div><div className="text-xs text-gray-400">{b.documento}</div></td>
                     <td className="px-4 py-3"><span className={`px-2 py-1 rounded-full text-xs font-medium ${CORES[b.situacao] || 'bg-gray-100 text-gray-600'}`}>{b.situacao}</span></td>
                     <td className="px-4 py-3 text-gray-700">{fmtData(b.vencimento)}</td>
-                    <td className="px-4 py-3 text-right font-semibold text-gray-900 tabular-nums">{brl(b.valor)}</td>
+                    <td className="px-4 py-3 text-right font-semibold text-gray-900 tabular-nums">
+                      {atualizado ? (
+                        <span title={`Original: ${brl(b.valor)} • Atualizado (2% multa + 1% a.m.): ${brl(atualizado)}`} className="cursor-help border-b border-dotted border-gray-400">
+                          {brl(b.valor)}
+                        </span>
+                      ) : brl(b.valor)}
+                    </td>
                     <td className="px-4 py-3 text-gray-600">
                       {b.data_ultima_notif ? <div><div>{fmtData(b.data_ultima_notif)}</div><div className="text-xs text-gray-400">{b.ultima_notificacao || ''}</div></div> : <span className="text-gray-300">—</span>}
                     </td>
                     <td className="px-4 py-3 text-right relative">
-                      <div className="inline-flex gap-1">
-                        <button onClick={() => copiar(b.pix_copia_cola, 'PIX')} title="Copiar PIX"
-                          className="px-2 py-1.5 bg-gray-50 text-gray-600 rounded-lg text-xs hover:bg-gray-100">PIX</button>
-                        <button onClick={() => copiar(b.linha_digitavel, 'Linha digitável')} title="Copiar linha digitável"
-                          className="px-2 py-1.5 bg-gray-50 text-gray-600 rounded-lg text-xs hover:bg-gray-100">Linha</button>
-                        <button onClick={() => { setEnvioAberto(envioAberto === b.codigo_solicitacao ? null : b.codigo_solicitacao); setItensEnvio(['pdf','pix','linha']); }}
-                          className="px-2 py-1.5 bg-emerald-50 text-emerald-600 rounded-lg text-xs font-medium hover:bg-emerald-100">Enviar</button>
-                        {podeCancelar(b.situacao) && (
-                          <button onClick={() => cancelar(b)} className="px-2 py-1.5 bg-red-50 text-red-600 rounded-lg text-xs font-medium hover:bg-red-100">Cancelar</button>
-                        )}
-                      </div>
+                      {ATIVO_COBRANCA(b.situacao) ? (
+                        <div className="inline-flex gap-1">
+                          <button onClick={() => copiar(b.pix_copia_cola, 'PIX')} title="Copiar PIX"
+                            className="px-2 py-1.5 bg-gray-50 text-gray-600 rounded-lg text-xs hover:bg-gray-100">PIX</button>
+                          <button onClick={() => copiar(b.linha_digitavel, 'Linha digitável')} title="Copiar linha digitável"
+                            className="px-2 py-1.5 bg-gray-50 text-gray-600 rounded-lg text-xs hover:bg-gray-100">Linha</button>
+                          <button onClick={() => { setEnvioAberto(envioAberto === b.codigo_solicitacao ? null : b.codigo_solicitacao); setItensEnvio(['pdf','pix','linha']); }}
+                            className="px-2 py-1.5 bg-emerald-50 text-emerald-600 rounded-lg text-xs font-medium hover:bg-emerald-100">Enviar</button>
+                          {podeCancelar(b.situacao) && (
+                            <button onClick={() => cancelar(b)} className="px-2 py-1.5 bg-red-50 text-red-600 rounded-lg text-xs font-medium hover:bg-red-100">Cancelar</button>
+                          )}
+                        </div>
+                      ) : <span className="text-gray-300 text-xs">—</span>}
                       {envioAberto === b.codigo_solicitacao && (
                         <div className="absolute right-4 top-12 z-20 bg-white border border-gray-200 rounded-xl shadow-lg p-3 w-52 text-left">
                           <div className="text-xs font-medium text-gray-700 mb-2">Enviar ao cliente:</div>
@@ -328,7 +367,8 @@ export default function Dashboard() {
                       )}
                     </td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -343,6 +383,15 @@ export default function Dashboard() {
         </div>
       </div>
     </div>
+  );
+}
+
+function Th({ label, onClick, align = 'left' }: { label: string; onClick: () => void; align?: 'left' | 'right' }) {
+  return (
+    <th onClick={onClick}
+      className={`px-4 py-3 font-medium cursor-pointer hover:text-gray-900 ${align === 'right' ? 'text-right' : ''}`}>
+      {label}
+    </th>
   );
 }
 
