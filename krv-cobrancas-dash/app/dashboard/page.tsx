@@ -23,6 +23,7 @@ type Boleto = {
   telefone: string | null; email: string | null;
   data_ultima_notif: string | null; ultima_notificacao: string | null;
   pix_copia_cola?: string | null; linha_digitavel?: string | null;
+  dias_atraso?: number | null;
 };
 type Metricas = {
   a_receber: number; atrasado: number; recebido: number;
@@ -30,8 +31,22 @@ type Metricas = {
 };
 type Pizza = { a_receber: number; atrasado: number; recebido: number };
 type SerieMes = { mes: string; recebido: number; atrasado: number; a_receber: number; inadimplencia: number };
-type SerieDia = { dia: string; recebido: number; atrasado: number; a_receber: number; inadimplencia: number };
 type SortKey = 'nome' | 'situacao' | 'vencimento' | 'valor' | 'data_ultima_notif' | 'conta';
+type Aging = {
+  f1_qtd: number; f2_qtd: number; f3_qtd: number; f4_qtd: number; f5_qtd: number;
+  f1_val: number; f2_val: number; f3_val: number; f4_val: number; f5_val: number;
+};
+type Devedor = { nome: string; documento: string; total_aberto: number; atrasado: number; qtd: number };
+type InadConta = { conta: string; atrasado: number; base: number; inadimplencia: number };
+type Resumo = { qtd: number; valor_total: number; qtd_atrasado: number; valor_atrasado: number };
+type Projecao = { valor_30d: number; qtd_30d: number };
+type Silencio = { qtd: number; valor: number };
+
+const NOME_CONTA: Record<string, string> = {
+  '360597122': 'Mansões do Lago', '441915256': 'Gran Royal', '319709051': 'Royal Park',
+  '216584469': 'Vivendas Pajuçara', '529462788': 'Paço das Águas',
+};
+const nomeConta = (id: string) => NOME_CONTA[id] || id;
 
 const SITUACOES = ['A_RECEBER', 'ATRASADO', 'RECEBIDO', 'CANCELADO'];
 const ITENS_ENVIO = [
@@ -47,7 +62,6 @@ const brl = (v: number | null | undefined) =>
 const fmtData = (v: string | null) => v ? new Date(v).toLocaleDateString('pt-BR', { timeZone: 'UTC' }) : '—';
 const MESES_ABR = ['jan','fev','mar','abr','mai','jun','jul','ago','set','out','nov','dez'];
 const fmtMes = (m: string) => { const [a, mm] = m.split('-'); return `${MESES_ABR[parseInt(mm,10)-1]}/${a.slice(2)}`; };
-const fmtDia = (d: string) => { const [, mm, dd] = d.split('-'); return `${dd}/${MESES_ABR[parseInt(mm,10)-1]}`; };
 
 // estima valor atualizado de boleto atrasado: 2% multa + 1% a.m. de juros pro rata
 function valorAtualizado(valor: number | null, vencimento: string | null): number | null {
@@ -85,8 +99,12 @@ export default function Dashboard() {
   const [metricas, setMetricas] = useState<Metricas | null>(null);
   const [pizza, setPizza] = useState<Pizza | null>(null);
   const [serie, setSerie] = useState<SerieMes[]>([]);
-  const [serieDia, setSerieDia] = useState<SerieDia[]>([]);
-  const [modoEvol, setModoEvol] = useState<'mensal' | 'diario'>('mensal');
+  const [aging, setAging] = useState<Aging | null>(null);
+  const [topDevedores, setTopDevedores] = useState<Devedor[]>([]);
+  const [inadConta, setInadConta] = useState<InadConta[]>([]);
+  const [resumo, setResumo] = useState<Resumo | null>(null);
+  const [projecao, setProjecao] = useState<Projecao | null>(null);
+  const [silencio, setSilencio] = useState<Silencio | null>(null);
   const [meses, setMeses] = useState<string[]>([]);
   const [mesVigente, setMesVigente] = useState('');
   const [total, setTotal] = useState(0);
@@ -97,6 +115,10 @@ export default function Dashboard() {
   const [envioAberto, setEnvioAberto] = useState<string | null>(null);
   const [itensEnvio, setItensEnvio] = useState<string[]>(['pdf', 'pix', 'linha']);
   const [enviando, setEnviando] = useState<string | null>(null);
+
+  // seleção em lote
+  const [selecionados, setSelecionados] = useState<Set<string>>(new Set());
+  const [enviandoLote, setEnviandoLote] = useState(false);
 
   useEffect(() => {
     const t = setTimeout(() => { setBuscaDeb(busca); setPage(1); }, 400);
@@ -116,8 +138,12 @@ export default function Dashboard() {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const d = await res.json();
       setBoletos(d.boletos || []); setMetricas(d.metricas || null); setPizza(d.pizza || null);
-      setSerie(d.serieMensal || []); setSerieDia(d.serieDiaria || []); setMeses(d.mesesDisponiveis || []);
+      setSerie(d.serieMensal || []); setMeses(d.mesesDisponiveis || []);
+      setAging(d.aging || null); setTopDevedores(d.topDevedores || []);
+      setInadConta(d.inadConta || []); setResumo(d.resumoFiltro || null);
+      setProjecao(d.projecao || null); setSilencio(d.silencio || null);
       setMesVigente(d.mesVigente || ''); setTotal(d.total || 0);
+      setSelecionados(new Set());
     } catch (e: any) { setErro('Falha ao carregar. ' + (e?.message || '')); }
     finally { setLoading(false); }
   }, [contasSel, situacoesSel, buscaDeb, mes, page, sort, dir, router]);
@@ -164,6 +190,45 @@ export default function Dashboard() {
     catch { mostrarToast('Não foi possível copiar.'); }
   };
 
+  // ---- seleção em lote (apenas boletos com cobrança ativa) ----
+  const selecionaveis = useMemo(
+    () => boletos.filter(b => ATIVO_COBRANCA(b.situacao)).map(b => b.codigo_solicitacao),
+    [boletos],
+  );
+  const toggleSel = (id: string) => setSelecionados(s => {
+    const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n;
+  });
+  const toggleSelTodos = () => setSelecionados(s =>
+    s.size === selecionaveis.length ? new Set() : new Set(selecionaveis));
+
+  const enviarLote = async () => {
+    const ids = [...selecionados];
+    if (!ids.length) return;
+    if (!window.confirm(`Disparar cobrança (PDF + PIX + linha) para ${ids.length} cliente(s)?`)) return;
+    setEnviandoLote(true);
+    let ok = 0, falha = 0;
+    for (const id of ids) {
+      const b = boletos.find(x => x.codigo_solicitacao === id);
+      if (!b) { falha++; continue; }
+      try {
+        const r = await fetch('/api/enviar', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id: b.codigo_solicitacao, conta: b.conta, enviar: ['pdf', 'pix', 'linha'] }),
+        });
+        r.ok ? ok++ : falha++;
+      } catch { falha++; }
+    }
+    setEnviandoLote(false); setSelecionados(new Set());
+    mostrarToast(`Lote: ${ok} enviado(s)${falha ? `, ${falha} falha(s)` : ''}.`);
+  };
+
+  const exportar = () => {
+    const qs = new URLSearchParams({
+      conta: contasSel.join(','), situacao: situacoesSel.join(','), busca: buscaDeb, mes,
+    });
+    window.open(`/api/boletos/export?${qs}`, '_blank');
+  };
+
   const inadimplencia = useMemo(() => {
     if (!metricas) return 0;
     const base = metricas.valor_a_receber + metricas.valor_atrasado + metricas.valor_recebido;
@@ -180,8 +245,30 @@ export default function Dashboard() {
   }, [pizza]);
 
   const serieFmt = useMemo(() => serie.map(s => ({ ...s, label: fmtMes(s.mes) })), [serie]);
-  const serieDiaFmt = useMemo(() => serieDia.map(s => ({ ...s, label: fmtDia(s.dia) })), [serieDia]);
-  const dadosEvol = modoEvol === 'mensal' ? serieFmt : serieDiaFmt;
+
+  const agingData = useMemo(() => {
+    if (!aging) return [];
+    return [
+      { faixa: '1–30', valor: aging.f1_val, qtd: aging.f1_qtd },
+      { faixa: '31–40', valor: aging.f2_val, qtd: aging.f2_qtd },
+      { faixa: '41–50', valor: aging.f3_val, qtd: aging.f3_qtd },
+      { faixa: '51–60', valor: aging.f4_val, qtd: aging.f4_qtd },
+      { faixa: '60+', valor: aging.f5_val, qtd: aging.f5_qtd },
+    ];
+  }, [aging]);
+  const CORES_AGING = ['#fbbf24', '#fb923c', '#f97316', '#ef4444', '#b91c1c'];
+
+  const inadContaData = useMemo(
+    () => inadConta.map(c => ({ ...c, nome: nomeConta(c.conta) })),
+    [inadConta],
+  );
+
+  const corDias = (d: number | null | undefined) => {
+    if (d == null) return 'text-gray-400';
+    if (d <= 30) return 'text-amber-600';
+    if (d <= 50) return 'text-orange-600';
+    return 'text-red-600 font-semibold';
+  };
 
   return (
     <div className="min-h-screen bg-gray-50 p-6">
@@ -219,23 +306,38 @@ export default function Dashboard() {
           </>
         )}
 
+        {/* Alerta de silêncio + Projeção 30 dias */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+          {silencio && silencio.qtd > 0 && (
+            <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 md:col-span-2 flex items-start gap-3">
+              <span className="text-amber-500 text-xl leading-none">⚠️</span>
+              <div>
+                <div className="text-sm font-semibold text-amber-800">
+                  {silencio.qtd} atrasado(s) sem notificação há mais de 7 dias
+                </div>
+                <div className="text-xs text-amber-700 mt-0.5">
+                  Somam {brl(silencio.valor)}. Régua pode ter falhado — vale reenviar.
+                </div>
+              </div>
+            </div>
+          )}
+          {projecao && (
+            <div className={`bg-white rounded-xl shadow-sm p-4 ${silencio && silencio.qtd > 0 ? '' : 'md:col-start-3'}`}>
+              <div className="text-xs text-gray-500 mb-1">Projeção — próximos 30 dias</div>
+              <div className="text-2xl font-bold text-indigo-700 tabular-nums">{brl(projecao.valor_30d)}</div>
+              <div className="text-xs text-gray-400 mt-1">{projecao.qtd_30d} boleto(s) a vencer</div>
+            </div>
+          )}
+        </div>
+
         {/* Gráficos */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">
           <div className="bg-white rounded-xl shadow-sm p-4 lg:col-span-2">
-            <div className="flex items-center justify-between mb-3">
-              <h3 className="text-sm font-medium text-gray-700">Evolução — Recebido vs Atrasado vs Inadimplência</h3>
-              <div className="inline-flex rounded-lg border border-gray-200 overflow-hidden text-xs">
-                <button onClick={() => setModoEvol('mensal')}
-                  className={`px-3 py-1.5 font-medium ${modoEvol === 'mensal' ? 'bg-indigo-600 text-white' : 'bg-white text-gray-500 hover:bg-gray-50'}`}>Mensal</button>
-                <button onClick={() => setModoEvol('diario')}
-                  className={`px-3 py-1.5 font-medium ${modoEvol === 'diario' ? 'bg-indigo-600 text-white' : 'bg-white text-gray-500 hover:bg-gray-50'}`}>Diário</button>
-              </div>
-            </div>
-            {modoEvol === 'diario' && <p className="text-xs text-gray-400 -mt-2 mb-2">1 mês antes a 1 mês depois de hoje (por vencimento)</p>}
+            <h3 className="text-sm font-medium text-gray-700 mb-3">Evolução mensal — Recebido vs Atrasado vs Inadimplência</h3>
             <ResponsiveContainer width="100%" height={240}>
-              <ComposedChart data={dadosEvol}>
+              <ComposedChart data={serieFmt}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                <XAxis dataKey="label" fontSize={12} interval={modoEvol === 'diario' ? 'preserveStartEnd' : 0} />
+                <XAxis dataKey="label" fontSize={12} />
                 <YAxis yAxisId="left" fontSize={11} tickFormatter={(v) => v >= 1000 ? `${(v/1000).toFixed(0)}k` : String(v)} />
                 <YAxis yAxisId="right" orientation="right" fontSize={11} tickFormatter={(v) => `${v}%`} domain={[0, 100]} />
                 <Tooltip formatter={(v: any, n: any) => n === 'Inadimplência' ? `${v}%` : brl(v)} />
@@ -259,6 +361,80 @@ export default function Dashboard() {
             </ResponsiveContainer>
           </div>
         </div>
+
+        {/* Aging + Inadimplência por empreendimento */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
+          <div className="bg-white rounded-xl shadow-sm p-4">
+            <h3 className="text-sm font-medium text-gray-700 mb-1">Aging de atrasados (dias)</h3>
+            <p className="text-xs text-gray-400 mb-3">Valor em aberto por faixa de atraso</p>
+            <ResponsiveContainer width="100%" height={220}>
+              <BarChart data={agingData}>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                <XAxis dataKey="faixa" fontSize={12} />
+                <YAxis fontSize={11} tickFormatter={(v) => v >= 1000 ? `${(v/1000).toFixed(0)}k` : String(v)} />
+                <Tooltip formatter={(v: any, _n: any, p: any) => [`${brl(v)} · ${p?.payload?.qtd} boleto(s)`, 'Atrasado']} />
+                <Bar dataKey="valor" radius={[4,4,0,0]}>
+                  {agingData.map((_, idx) => <Cell key={idx} fill={CORES_AGING[idx]} />)}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+          <div className="bg-white rounded-xl shadow-sm p-4">
+            <h3 className="text-sm font-medium text-gray-700 mb-1">Inadimplência por empreendimento</h3>
+            <p className="text-xs text-gray-400 mb-3">% do valor da carteira em atraso</p>
+            <ResponsiveContainer width="100%" height={220}>
+              <BarChart data={inadContaData} layout="vertical" margin={{ left: 20 }}>
+                <CartesianGrid strokeDasharray="3 3" horizontal={false} />
+                <XAxis type="number" fontSize={11} tickFormatter={(v) => `${v}%`} domain={[0, 100]} />
+                <YAxis type="category" dataKey="nome" fontSize={11} width={110} />
+                <Tooltip formatter={(v: any, _n: any, p: any) => [`${v}% · ${brl(p?.payload?.atrasado)} em atraso`, 'Inadimplência']} />
+                <Bar dataKey="inadimplencia" radius={[0,4,4,0]}>
+                  {inadContaData.map((c, idx) => (
+                    <Cell key={idx} fill={c.inadimplencia > 20 ? '#ef4444' : c.inadimplencia > 10 ? '#f59e0b' : '#22c55e'} />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+
+        {/* Top devedores */}
+        {topDevedores.length > 0 && (
+          <div className="bg-white rounded-xl shadow-sm p-4 mb-6">
+            <h3 className="text-sm font-medium text-gray-700 mb-1">Top 10 devedores</h3>
+            <p className="text-xs text-gray-400 mb-3">Maior valor em aberto (atrasado + a receber)</p>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="text-gray-500 text-left text-xs">
+                  <tr>
+                    <th className="py-2 font-medium">#</th>
+                    <th className="py-2 font-medium">Cliente</th>
+                    <th className="py-2 font-medium text-right">Em atraso</th>
+                    <th className="py-2 font-medium text-right">Total aberto</th>
+                    <th className="py-2 font-medium text-center">Boletos</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {topDevedores.map((d, idx) => (
+                    <tr key={d.documento || idx} className="hover:bg-gray-50">
+                      <td className="py-2 text-gray-400">{idx + 1}</td>
+                      <td className="py-2">
+                        <button onClick={() => { setBusca(d.documento || d.nome); }}
+                          className="font-medium text-gray-900 hover:text-indigo-600 text-left">
+                          {d.nome || '—'}
+                        </button>
+                        <div className="text-xs text-gray-400">{d.documento}</div>
+                      </td>
+                      <td className="py-2 text-right tabular-nums text-red-600">{brl(d.atrasado)}</td>
+                      <td className="py-2 text-right tabular-nums font-semibold text-gray-900">{brl(d.total_aberto)}</td>
+                      <td className="py-2 text-center text-gray-500">{d.qtd}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
 
         {/* Filtros */}
         <div className="bg-white rounded-xl shadow-sm p-4 mb-4">
@@ -318,28 +494,74 @@ export default function Dashboard() {
 
         {/* Tabela */}
         <div className="bg-white rounded-xl shadow-sm overflow-visible">
+          {/* Barra de resumo + ações em lote */}
+          <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 border-b border-gray-100">
+            <div className="text-sm text-gray-600">
+              {resumo && (
+                <>
+                  <span className="font-semibold text-gray-900">{resumo.qtd}</span> boleto(s) no filtro ·{' '}
+                  <span className="font-semibold text-gray-900 tabular-nums">{brl(resumo.valor_total)}</span>
+                  {resumo.qtd_atrasado > 0 && (
+                    <span className="text-red-600"> · {resumo.qtd_atrasado} atrasado(s) ({brl(resumo.valor_atrasado)})</span>
+                  )}
+                </>
+              )}
+            </div>
+            <div className="flex items-center gap-2">
+              {selecionados.size > 0 && (
+                <button onClick={enviarLote} disabled={enviandoLote}
+                  className="px-3 py-1.5 bg-emerald-600 text-white rounded-lg text-xs font-medium hover:bg-emerald-700 disabled:opacity-50">
+                  {enviandoLote ? 'Enviando...' : `Enviar cobrança (${selecionados.size})`}
+                </button>
+              )}
+              <button onClick={exportar}
+                className="px-3 py-1.5 bg-gray-100 text-gray-700 rounded-lg text-xs font-medium hover:bg-gray-200">
+                Exportar CSV
+              </button>
+            </div>
+          </div>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead className="bg-gray-50 text-gray-600 text-left select-none">
                 <tr>
+                  <th className="px-3 py-3 w-8">
+                    <input type="checkbox"
+                      checked={selecionaveis.length > 0 && selecionados.size === selecionaveis.length}
+                      onChange={toggleSelTodos} title="Selecionar todos (cobrança ativa)" />
+                  </th>
                   <Th onClick={() => ordenar('nome')} label={`Cliente${setaSort('nome')}`} />
                   <Th onClick={() => ordenar('situacao')} label={`Situação${setaSort('situacao')}`} />
                   <Th onClick={() => ordenar('vencimento')} label={`Vencimento${setaSort('vencimento')}`} />
+                  <th className="px-4 py-3 font-medium text-right">Atraso</th>
                   <Th onClick={() => ordenar('valor')} label={`Valor${setaSort('valor')}`} align="right" />
                   <Th onClick={() => ordenar('data_ultima_notif')} label={`Última notif.${setaSort('data_ultima_notif')}`} />
                   <th className="px-4 py-3 font-medium text-right">Ações</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
-                {loading && <tr><td colSpan={6} className="px-4 py-8 text-center text-gray-400">Carregando...</td></tr>}
-                {!loading && boletos.length === 0 && <tr><td colSpan={6} className="px-4 py-8 text-center text-gray-400">Nenhum boleto encontrado.</td></tr>}
+                {loading && <tr><td colSpan={8} className="px-4 py-8 text-center text-gray-400">Carregando...</td></tr>}
+                {!loading && boletos.length === 0 && <tr><td colSpan={8} className="px-4 py-8 text-center text-gray-400">Nenhum boleto encontrado.</td></tr>}
                 {!loading && boletos.map((b) => {
                   const atualizado = b.situacao === 'ATRASADO' ? valorAtualizado(b.valor, b.vencimento) : null;
                   return (
                   <tr key={b.codigo_solicitacao} className="hover:bg-gray-50">
-                    <td className="px-4 py-3"><div className="font-medium text-gray-900">{b.nome || '—'}</div><div className="text-xs text-gray-400">{b.documento}</div></td>
+                    <td className="px-3 py-3">
+                      {ATIVO_COBRANCA(b.situacao) && (
+                        <input type="checkbox" checked={selecionados.has(b.codigo_solicitacao)}
+                          onChange={() => toggleSel(b.codigo_solicitacao)} />
+                      )}
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="font-medium text-gray-900">{b.nome || '—'}</div>
+                      <div className="text-xs text-gray-400">{b.documento} · {nomeConta(b.conta)}</div>
+                    </td>
                     <td className="px-4 py-3"><span className={`px-2 py-1 rounded-full text-xs font-medium ${CORES[b.situacao] || 'bg-gray-100 text-gray-600'}`}>{b.situacao}</span></td>
                     <td className="px-4 py-3 text-gray-700">{fmtData(b.vencimento)}</td>
+                    <td className="px-4 py-3 text-right tabular-nums">
+                      {b.situacao === 'ATRASADO' && b.dias_atraso != null
+                        ? <span className={corDias(b.dias_atraso)}>{b.dias_atraso}d</span>
+                        : <span className="text-gray-300">—</span>}
+                    </td>
                     <td className="px-4 py-3 text-right font-semibold text-gray-900 tabular-nums">
                       {atualizado ? (
                         <span title={`Original: ${brl(b.valor)} • Atualizado (2% multa + 1% a.m.): ${brl(atualizado)}`} className="cursor-help border-b border-dotted border-gray-400">
