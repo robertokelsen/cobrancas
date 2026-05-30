@@ -74,17 +74,18 @@ export async function GET(req: NextRequest) {
     if (contas.length) { condM.push(`conta = ANY($${j++})`); paramsM.push(contas); }
     if (mesValido) { condM.push(`to_char(vencimento, 'YYYY-MM') = $${j++}`); paramsM.push(mes); }
     const whereM = condM.length ? `where ${condM.join(' and ')}` : '';
-    // o "A Receber" do card sempre considera o mês vigente (não o gigante acumulado).
-    // demais métricas seguem o filtro de mês selecionado (ou todos).
+    // "A Receber" e "Recebidos" do card consideram o mês vigente (não o acumulado).
+    // "Atrasados" segue o filtro de mês selecionado (ou todos).
     const idxMesVig = j++; paramsM.push(mesVigente);
+    // A Receber e Recebidos consideram o mês vigente; Atrasados é o acumulado.
     const metricas = await client.query(`
       select
         count(*) filter (where situacao='A_RECEBER' and to_char(vencimento,'YYYY-MM')=$${idxMesVig})::int as a_receber,
         count(*) filter (where situacao='ATRASADO')::int  as atrasado,
-        count(*) filter (where situacao='RECEBIDO')::int  as recebido,
+        count(*) filter (where situacao='RECEBIDO' and to_char(vencimento,'YYYY-MM')=$${idxMesVig})::int  as recebido,
         coalesce(sum(valor) filter (where situacao='A_RECEBER' and to_char(vencimento,'YYYY-MM')=$${idxMesVig}),0)::float as valor_a_receber,
         coalesce(sum(valor) filter (where situacao='ATRASADO'),0)::float  as valor_atrasado,
-        coalesce(sum(valor) filter (where situacao='RECEBIDO'),0)::float   as valor_recebido
+        coalesce(sum(valor) filter (where situacao='RECEBIDO' and to_char(vencimento,'YYYY-MM')=$${idxMesVig}),0)::float   as valor_recebido
       from krv_cobrancas.cobrancas ${whereM};`, paramsM);
 
     // ---- PIZZA: distribuição por VALOR do MÊS VIGENTE (respeita conta) ----
@@ -120,6 +121,29 @@ export async function GET(req: NextRequest) {
       where ${condS.join(' and ')}
       group by 1 order by 1;`, paramsS);
 
+    // ---- SERIE diaria: respeita conta(s); janela de ~1 mês antes a 1 mês depois de hoje ----
+    const condD: string[] = ['vencimento is not null',
+      `vencimento >= (current_date - interval '1 month')`,
+      `vencimento <= (current_date + interval '1 month')`];
+    const paramsD: any[] = []; let m = 1;
+    if (contas.length) { condD.unshift(`conta = ANY($${m++})`); paramsD.push(contas); }
+    const serieDiaria = await client.query(`
+      select to_char(vencimento,'YYYY-MM-DD') as dia,
+        coalesce(sum(valor) filter (where situacao='RECEBIDO'),0)::float as recebido,
+        coalesce(sum(valor) filter (where situacao='ATRASADO'),0)::float as atrasado,
+        coalesce(sum(valor) filter (where situacao='A_RECEBER'),0)::float as a_receber,
+        case
+          when coalesce(sum(valor) filter (where situacao in ('RECEBIDO','ATRASADO','A_RECEBER')),0) > 0
+          then round(
+            100.0 * coalesce(sum(valor) filter (where situacao='ATRASADO'),0)
+            / coalesce(sum(valor) filter (where situacao in ('RECEBIDO','ATRASADO','A_RECEBER')),0)
+          , 1)
+          else 0
+        end::float as inadimplencia
+      from krv_cobrancas.cobrancas
+      where ${condD.join(' and ')}
+      group by 1 order by 1;`, paramsD);
+
     // ---- Meses disponiveis: respeita conta(s) ----
     const condMs: string[] = ['vencimento is not null']; const paramsMs: any[] = []; let l = 1;
     if (contas.length) { condMs.unshift(`conta = ANY($${l++})`); paramsMs.push(contas); }
@@ -133,6 +157,7 @@ export async function GET(req: NextRequest) {
       metricas: metricas.rows[0],
       pizza: pizza.rows[0],
       serieMensal: serie.rows,
+      serieDiaria: serieDiaria.rows,
       mesesDisponiveis: meses.rows.map(r => r.mes),
       mesVigente,
       total: totalRes.rows[0].total,
