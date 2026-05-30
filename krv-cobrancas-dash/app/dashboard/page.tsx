@@ -30,6 +30,7 @@ type Metricas = {
 };
 type Pizza = { a_receber: number; atrasado: number; recebido: number };
 type SerieMes = { mes: string; recebido: number; atrasado: number; a_receber: number; inadimplencia: number };
+type SerieDia = { dia: string; recebido: number; atrasado: number; a_receber: number; inadimplencia: number };
 type SortKey = 'nome' | 'situacao' | 'vencimento' | 'valor' | 'data_ultima_notif' | 'conta';
 
 const SITUACOES = ['A_RECEBER', 'ATRASADO', 'RECEBIDO', 'CANCELADO'];
@@ -46,6 +47,7 @@ const brl = (v: number | null | undefined) =>
 const fmtData = (v: string | null) => v ? new Date(v).toLocaleDateString('pt-BR', { timeZone: 'UTC' }) : '—';
 const MESES_ABR = ['jan','fev','mar','abr','mai','jun','jul','ago','set','out','nov','dez'];
 const fmtMes = (m: string) => { const [a, mm] = m.split('-'); return `${MESES_ABR[parseInt(mm,10)-1]}/${a.slice(2)}`; };
+const fmtDia = (d: string) => { const [, mm, dd] = d.split('-'); return `${dd}/${MESES_ABR[parseInt(mm,10)-1]}`; };
 
 // estima valor atualizado de boleto atrasado: 2% multa + 1% a.m. de juros pro rata
 function valorAtualizado(valor: number | null, vencimento: string | null): number | null {
@@ -83,6 +85,8 @@ export default function Dashboard() {
   const [metricas, setMetricas] = useState<Metricas | null>(null);
   const [pizza, setPizza] = useState<Pizza | null>(null);
   const [serie, setSerie] = useState<SerieMes[]>([]);
+  const [serieDia, setSerieDia] = useState<SerieDia[]>([]);
+  const [modoEvol, setModoEvol] = useState<'mensal' | 'diario'>('mensal');
   const [meses, setMeses] = useState<string[]>([]);
   const [mesVigente, setMesVigente] = useState('');
   const [total, setTotal] = useState(0);
@@ -112,7 +116,7 @@ export default function Dashboard() {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const d = await res.json();
       setBoletos(d.boletos || []); setMetricas(d.metricas || null); setPizza(d.pizza || null);
-      setSerie(d.serieMensal || []); setMeses(d.mesesDisponiveis || []);
+      setSerie(d.serieMensal || []); setSerieDia(d.serieDiaria || []); setMeses(d.mesesDisponiveis || []);
       setMesVigente(d.mesVigente || ''); setTotal(d.total || 0);
     } catch (e: any) { setErro('Falha ao carregar. ' + (e?.message || '')); }
     finally { setLoading(false); }
@@ -175,7 +179,9 @@ export default function Dashboard() {
     ].filter(d => d.value > 0);
   }, [pizza]);
 
-  const serieFmt = useMemo(() => serie.map(s => ({ ...s, mesLabel: fmtMes(s.mes) })), [serie]);
+  const serieFmt = useMemo(() => serie.map(s => ({ ...s, label: fmtMes(s.mes) })), [serie]);
+  const serieDiaFmt = useMemo(() => serieDia.map(s => ({ ...s, label: fmtDia(s.dia) })), [serieDia]);
+  const dadosEvol = modoEvol === 'mensal' ? serieFmt : serieDiaFmt;
 
   return (
     <div className="min-h-screen bg-gray-50 p-6">
@@ -201,7 +207,7 @@ export default function Dashboard() {
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
             <Card t={`A Receber (${mesVigente ? fmtMes(mesVigente) : 'mês'})`} cor="text-blue-700" q={metricas.a_receber} v={metricas.valor_a_receber} />
             <Card t="Atrasados" cor="text-red-700" q={metricas.atrasado} v={metricas.valor_atrasado} />
-            <Card t="Recebidos" cor="text-green-700" q={metricas.recebido} v={metricas.valor_recebido} />
+            <Card t={`Recebidos (${mesVigente ? fmtMes(mesVigente) : 'mês'})`} cor="text-green-700" q={metricas.recebido} v={metricas.valor_recebido} />
             <div className="bg-white rounded-xl shadow-sm p-4">
               <div className="text-xs text-gray-500 mb-1">Inadimplência</div>
               <div className={`text-2xl font-bold ${inadimplencia > 20 ? 'text-red-600' : 'text-amber-600'}`}>
@@ -216,11 +222,20 @@ export default function Dashboard() {
         {/* Gráficos */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">
           <div className="bg-white rounded-xl shadow-sm p-4 lg:col-span-2">
-            <h3 className="text-sm font-medium text-gray-700 mb-3">Evolução mensal — Recebido vs Atrasado vs Inadimplência</h3>
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-sm font-medium text-gray-700">Evolução — Recebido vs Atrasado vs Inadimplência</h3>
+              <div className="inline-flex rounded-lg border border-gray-200 overflow-hidden text-xs">
+                <button onClick={() => setModoEvol('mensal')}
+                  className={`px-3 py-1.5 font-medium ${modoEvol === 'mensal' ? 'bg-indigo-600 text-white' : 'bg-white text-gray-500 hover:bg-gray-50'}`}>Mensal</button>
+                <button onClick={() => setModoEvol('diario')}
+                  className={`px-3 py-1.5 font-medium ${modoEvol === 'diario' ? 'bg-indigo-600 text-white' : 'bg-white text-gray-500 hover:bg-gray-50'}`}>Diário</button>
+              </div>
+            </div>
+            {modoEvol === 'diario' && <p className="text-xs text-gray-400 -mt-2 mb-2">1 mês antes a 1 mês depois de hoje (por vencimento)</p>}
             <ResponsiveContainer width="100%" height={240}>
-              <ComposedChart data={serieFmt}>
+              <ComposedChart data={dadosEvol}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                <XAxis dataKey="mesLabel" fontSize={12} />
+                <XAxis dataKey="label" fontSize={12} interval={modoEvol === 'diario' ? 'preserveStartEnd' : 0} />
                 <YAxis yAxisId="left" fontSize={11} tickFormatter={(v) => v >= 1000 ? `${(v/1000).toFixed(0)}k` : String(v)} />
                 <YAxis yAxisId="right" orientation="right" fontSize={11} tickFormatter={(v) => `${v}%`} domain={[0, 100]} />
                 <Tooltip formatter={(v: any, n: any) => n === 'Inadimplência' ? `${v}%` : brl(v)} />
