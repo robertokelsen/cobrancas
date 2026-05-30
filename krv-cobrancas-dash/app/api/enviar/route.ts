@@ -14,10 +14,10 @@ export async function POST(req: NextRequest) {
   }
   const itens = Array.isArray(enviar) && enviar.length ? enviar : ['pdf', 'pix', 'linha'];
 
-const controller = new AbortController();
+  const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 20000);
   try {
-    const r = await fetch(`${N8N_BASE}/krv-boletos/${conta}/callback`, {
+    const r = await fetch(`${N8N_BASE}/krv-boletos/${conta}/enviar-boleto`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ id, conta, enviar: itens }),
