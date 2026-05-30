@@ -59,7 +59,9 @@ export async function GET(req: NextRequest) {
       select codigo_solicitacao, conta, nome, documento, situacao,
              vencimento, valor, dias_uteis, data_situacao, classificacao,
              telefone, email, data_ultima_notif, ultima_notificacao,
-             pix_copia_cola, linha_digitavel
+             pix_copia_cola, linha_digitavel,
+             case when situacao='ATRASADO' and vencimento is not null
+                  then (current_date - vencimento) else null end as dias_atraso
       from krv_cobrancas.cobrancas
       ${where}
       ${orderBy}
@@ -68,6 +70,15 @@ export async function GET(req: NextRequest) {
 
     const totalRes = await client.query(
       `select count(*)::int as total from krv_cobrancas.cobrancas ${where};`, params);
+
+    // ---- RESUMO do filtro atual (item 9): soma o que está filtrado na tabela ----
+    const resumoFiltro = await client.query(`
+      select
+        count(*)::int as qtd,
+        coalesce(sum(valor),0)::float as valor_total,
+        count(*) filter (where situacao='ATRASADO')::int as qtd_atrasado,
+        coalesce(sum(valor) filter (where situacao='ATRASADO'),0)::float as valor_atrasado
+      from krv_cobrancas.cobrancas ${where};`, params);
 
     // ---- METRICAS (cards): conta(s) + mês do filtro; A_RECEBER do MÊS VIGENTE ----
     const condM: string[] = []; const paramsM: any[] = []; let j = 1;
@@ -121,28 +132,78 @@ export async function GET(req: NextRequest) {
       where ${condS.join(' and ')}
       group by 1 order by 1;`, paramsS);
 
-    // ---- SERIE diaria: respeita conta(s); janela de ~1 mês antes a 1 mês depois de hoje ----
-    const condD: string[] = ['vencimento is not null',
-      `vencimento >= (current_date - interval '1 month')`,
-      `vencimento <= (current_date + interval '1 month')`];
-    const paramsD: any[] = []; let m = 1;
-    if (contas.length) { condD.unshift(`conta = ANY($${m++})`); paramsD.push(contas); }
-    const serieDiaria = await client.query(`
-      select to_char(vencimento,'YYYY-MM-DD') as dia,
-        coalesce(sum(valor) filter (where situacao='RECEBIDO'),0)::float as recebido,
+    // ======================================================================
+    // PAINÉIS ANALÍTICOS — todos respeitam apenas conta(s) (não o filtro de mês,
+    // pois são visões de risco/carteira). Param base reaproveitado.
+    // ======================================================================
+    const contaCond = contas.length ? `conta = ANY($1)` : 'true';
+    const contaParam = contas.length ? [contas] : [];
+
+    // ---- AGING de atrasados: 1-30 / 31-40 / 41-50 / 51-60 / 60+ ----
+    const aging = await client.query(`
+      with a as (
+        select valor, (current_date - vencimento) as d
+        from krv_cobrancas.cobrancas
+        where situacao='ATRASADO' and vencimento is not null and ${contaCond}
+      )
+      select
+        count(*) filter (where d between 1 and 30)::int  as f1_qtd,
+        count(*) filter (where d between 31 and 40)::int as f2_qtd,
+        count(*) filter (where d between 41 and 50)::int as f3_qtd,
+        count(*) filter (where d between 51 and 60)::int as f4_qtd,
+        count(*) filter (where d > 60)::int              as f5_qtd,
+        coalesce(sum(valor) filter (where d between 1 and 30),0)::float  as f1_val,
+        coalesce(sum(valor) filter (where d between 31 and 40),0)::float as f2_val,
+        coalesce(sum(valor) filter (where d between 41 and 50),0)::float as f3_val,
+        coalesce(sum(valor) filter (where d between 51 and 60),0)::float as f4_val,
+        coalesce(sum(valor) filter (where d > 60),0)::float              as f5_val
+      from a;`, contaParam);
+
+    // ---- TOP DEVEDORES: maior valor em aberto (ATRASADO + A_RECEBER) por cliente ----
+    const topDevedores = await client.query(`
+      select nome, documento,
+        coalesce(sum(valor),0)::float as total_aberto,
         coalesce(sum(valor) filter (where situacao='ATRASADO'),0)::float as atrasado,
-        coalesce(sum(valor) filter (where situacao='A_RECEBER'),0)::float as a_receber,
+        count(*)::int as qtd
+      from krv_cobrancas.cobrancas
+      where situacao in ('ATRASADO','A_RECEBER') and ${contaCond}
+      group by nome, documento
+      order by total_aberto desc
+      limit 10;`, contaParam);
+
+    // ---- INADIMPLÊNCIA por EMPREENDIMENTO ----
+    const inadConta = await client.query(`
+      select conta,
+        coalesce(sum(valor) filter (where situacao='ATRASADO'),0)::float as atrasado,
+        coalesce(sum(valor) filter (where situacao in ('RECEBIDO','ATRASADO','A_RECEBER')),0)::float as base,
         case
           when coalesce(sum(valor) filter (where situacao in ('RECEBIDO','ATRASADO','A_RECEBER')),0) > 0
-          then round(
-            100.0 * coalesce(sum(valor) filter (where situacao='ATRASADO'),0)
-            / coalesce(sum(valor) filter (where situacao in ('RECEBIDO','ATRASADO','A_RECEBER')),0)
-          , 1)
+          then round(100.0 * coalesce(sum(valor) filter (where situacao='ATRASADO'),0)
+               / coalesce(sum(valor) filter (where situacao in ('RECEBIDO','ATRASADO','A_RECEBER')),0), 1)
           else 0
         end::float as inadimplencia
       from krv_cobrancas.cobrancas
-      where ${condD.join(' and ')}
-      group by 1 order by 1;`, paramsD);
+      where ${contaCond}
+      group by conta
+      order by inadimplencia desc;`, contaParam);
+
+    // ---- PROJEÇÃO 30 dias: A_RECEBER vencendo nos próximos 30 dias ----
+    const proj = await client.query(`
+      select
+        coalesce(sum(valor),0)::float as valor_30d,
+        count(*)::int as qtd_30d
+      from krv_cobrancas.cobrancas
+      where situacao='A_RECEBER' and vencimento between current_date and (current_date + interval '30 days')
+        and ${contaCond};`, contaParam);
+
+    // ---- SILÊNCIO: atrasados há >7 dias SEM notificação nos últimos 7 dias ----
+    const silencio = await client.query(`
+      select count(*)::int as qtd, coalesce(sum(valor),0)::float as valor
+      from krv_cobrancas.cobrancas
+      where situacao='ATRASADO' and vencimento is not null
+        and (current_date - vencimento) > 7
+        and (data_ultima_notif is null or data_ultima_notif < (current_date - interval '7 days'))
+        and ${contaCond};`, contaParam);
 
     // ---- Meses disponiveis: respeita conta(s) ----
     const condMs: string[] = ['vencimento is not null']; const paramsMs: any[] = []; let l = 1;
@@ -157,7 +218,12 @@ export async function GET(req: NextRequest) {
       metricas: metricas.rows[0],
       pizza: pizza.rows[0],
       serieMensal: serie.rows,
-      serieDiaria: serieDiaria.rows,
+      resumoFiltro: resumoFiltro.rows[0],
+      aging: aging.rows[0],
+      topDevedores: topDevedores.rows,
+      inadConta: inadConta.rows,
+      projecao: proj.rows[0],
+      silencio: silencio.rows[0],
       mesesDisponiveis: meses.rows.map(r => r.mes),
       mesVigente,
       total: totalRes.rows[0].total,
