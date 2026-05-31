@@ -26,8 +26,8 @@ type Boleto = {
   dias_atraso?: number | null;
 };
 type Metricas = {
-  a_receber: number; atrasado: number; recebido: number;
-  valor_a_receber: number; valor_atrasado: number; valor_recebido: number;
+  a_receber: number; atrasado: number; recebido: number; expirado: number;
+  valor_a_receber: number; valor_atrasado: number; valor_recebido: number; valor_expirado: number;
 };
 type Pizza = { a_receber: number; atrasado: number; recebido: number };
 type SerieMes = { mes: string; recebido: number; atrasado: number; a_receber: number; inadimplencia: number };
@@ -48,14 +48,16 @@ const NOME_CONTA: Record<string, string> = {
 };
 const nomeConta = (id: string) => NOME_CONTA[id] || id;
 
-const SITUACOES = ['A_RECEBER', 'ATRASADO', 'RECEBIDO', 'CANCELADO'];
+const SITUACOES = ['A_RECEBER', 'ATRASADO', 'RECEBIDO', 'EXPIRADO', 'CANCELADO'];
 const ITENS_ENVIO = [
   { k: 'pdf', label: 'PDF do boleto' },
   { k: 'pix', label: 'PIX copia e cola' },
   { k: 'linha', label: 'Linha digitável' },
 ];
-// situações em que ações de cobrança (PIX/Linha/Enviar/Cancelar) fazem sentido
+// situações em que o ENVIO de boleto (PIX/Linha/Enviar) faz sentido
 const ATIVO_COBRANCA = (s: string) => s === 'A_RECEBER' || s === 'ATRASADO';
+// situações em que CANCELAR é permitido (inclui expirados, p/ encerrar a régua)
+const PODE_CANCELAR = (s: string) => s === 'A_RECEBER' || s === 'ATRASADO' || s === 'EXPIRADO';
 
 const brl = (v: number | null | undefined) =>
   (Number(v) || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', minimumFractionDigits: 2 });
@@ -76,7 +78,8 @@ function valorAtualizado(valor: number | null, vencimento: string | null): numbe
 
 const CORES: Record<string, string> = {
   A_RECEBER: 'bg-blue-100 text-blue-700', ATRASADO: 'bg-red-100 text-red-700',
-  RECEBIDO: 'bg-green-100 text-green-700', CANCELADO: 'bg-gray-200 text-gray-600',
+  RECEBIDO: 'bg-green-100 text-green-700', EXPIRADO: 'bg-orange-100 text-orange-700',
+  CANCELADO: 'bg-gray-200 text-gray-600',
 };
 const CORES_PIE: Record<string, string> = {
   A_RECEBER: '#3b82f6', ATRASADO: '#ef4444', RECEBIDO: '#22c55e',
@@ -165,7 +168,6 @@ export default function Dashboard() {
     else { setSort(key); setDir('asc'); }
   };
   const setaSort = (key: SortKey) => sort === key ? (dir === 'asc' ? ' ▲' : ' ▼') : '';
-  const podeCancelar = (s: string) => s === 'A_RECEBER' || s === 'ATRASADO';
   const cancelar = (b: Boleto) =>
     window.open(`${N8N_BASE}/krv-boletos/${b.conta}/cancelar?id=${encodeURIComponent(b.codigo_solicitacao)}`, '_blank', 'noopener');
   const sair = async () => { await fetch('/api/logout', { method: 'POST' }); router.push('/login'); };
@@ -291,9 +293,10 @@ export default function Dashboard() {
             {mes ? `Mostrando dados de ${fmtMes(mes)}` : 'Mostrando todos os meses'}
             {contasSel.length < CONTAS.length ? ` · ${contasSel.length} de ${CONTAS.length} empreendimentos` : ' · todos os empreendimentos'}
           </div>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
             <Card t={`A Receber (${mesVigente ? fmtMes(mesVigente) : 'mês'})`} cor="text-blue-700" q={metricas.a_receber} v={metricas.valor_a_receber} />
             <Card t="Atrasados" cor="text-red-700" q={metricas.atrasado} v={metricas.valor_atrasado} />
+            <Card t="Expirados" cor="text-orange-700" q={metricas.expirado} v={metricas.valor_expirado} />
             <Card t={`Recebidos (${mesVigente ? fmtMes(mesVigente) : 'mês'})`} cor="text-green-700" q={metricas.recebido} v={metricas.valor_recebido} />
             <div className="bg-white rounded-xl shadow-sm p-4">
               <div className="text-xs text-gray-500 mb-1">Inadimplência</div>
@@ -573,15 +576,19 @@ export default function Dashboard() {
                       {b.data_ultima_notif ? <div><div>{fmtData(b.data_ultima_notif)}</div><div className="text-xs text-gray-400">{b.ultima_notificacao || ''}</div></div> : <span className="text-gray-300">—</span>}
                     </td>
                     <td className="px-4 py-3 text-right relative">
-                      {ATIVO_COBRANCA(b.situacao) ? (
+                      {(ATIVO_COBRANCA(b.situacao) || PODE_CANCELAR(b.situacao)) ? (
                         <div className="inline-flex gap-1">
-                          <button onClick={() => copiar(b.pix_copia_cola, 'PIX')} title="Copiar PIX"
-                            className="px-2 py-1.5 bg-gray-50 text-gray-600 rounded-lg text-xs hover:bg-gray-100">PIX</button>
-                          <button onClick={() => copiar(b.linha_digitavel, 'Linha digitável')} title="Copiar linha digitável"
-                            className="px-2 py-1.5 bg-gray-50 text-gray-600 rounded-lg text-xs hover:bg-gray-100">Linha</button>
-                          <button onClick={() => { setEnvioAberto(envioAberto === b.codigo_solicitacao ? null : b.codigo_solicitacao); setItensEnvio(['pdf','pix','linha']); }}
-                            className="px-2 py-1.5 bg-emerald-50 text-emerald-600 rounded-lg text-xs font-medium hover:bg-emerald-100">Enviar</button>
-                          {podeCancelar(b.situacao) && (
+                          {ATIVO_COBRANCA(b.situacao) && (
+                            <>
+                              <button onClick={() => copiar(b.pix_copia_cola, 'PIX')} title="Copiar PIX"
+                                className="px-2 py-1.5 bg-gray-50 text-gray-600 rounded-lg text-xs hover:bg-gray-100">PIX</button>
+                              <button onClick={() => copiar(b.linha_digitavel, 'Linha digitável')} title="Copiar linha digitável"
+                                className="px-2 py-1.5 bg-gray-50 text-gray-600 rounded-lg text-xs hover:bg-gray-100">Linha</button>
+                              <button onClick={() => { setEnvioAberto(envioAberto === b.codigo_solicitacao ? null : b.codigo_solicitacao); setItensEnvio(['pdf','pix','linha']); }}
+                                className="px-2 py-1.5 bg-emerald-50 text-emerald-600 rounded-lg text-xs font-medium hover:bg-emerald-100">Enviar</button>
+                            </>
+                          )}
+                          {PODE_CANCELAR(b.situacao) && (
                             <button onClick={() => cancelar(b)} className="px-2 py-1.5 bg-red-50 text-red-600 rounded-lg text-xs font-medium hover:bg-red-100">Cancelar</button>
                           )}
                         </div>
