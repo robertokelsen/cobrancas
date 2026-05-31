@@ -94,9 +94,11 @@ export async function GET(req: NextRequest) {
         count(*) filter (where situacao='A_RECEBER' and to_char(vencimento,'YYYY-MM')=$${idxMesVig})::int as a_receber,
         count(*) filter (where situacao='ATRASADO')::int  as atrasado,
         count(*) filter (where situacao='RECEBIDO' and to_char(vencimento,'YYYY-MM')=$${idxMesVig})::int  as recebido,
+        count(*) filter (where situacao='EXPIRADO')::int  as expirado,
         coalesce(sum(valor) filter (where situacao='A_RECEBER' and to_char(vencimento,'YYYY-MM')=$${idxMesVig}),0)::float as valor_a_receber,
         coalesce(sum(valor) filter (where situacao='ATRASADO'),0)::float  as valor_atrasado,
-        coalesce(sum(valor) filter (where situacao='RECEBIDO' and to_char(vencimento,'YYYY-MM')=$${idxMesVig}),0)::float   as valor_recebido
+        coalesce(sum(valor) filter (where situacao='RECEBIDO' and to_char(vencimento,'YYYY-MM')=$${idxMesVig}),0)::float   as valor_recebido,
+        coalesce(sum(valor) filter (where situacao='EXPIRADO'),0)::float   as valor_expirado
       from krv_cobrancas.cobrancas ${whereM};`, paramsM);
 
     // ---- PIZZA: distribuição por VALOR do MÊS VIGENTE (respeita conta) ----
@@ -106,7 +108,7 @@ export async function GET(req: NextRequest) {
     const pizza = await client.query(`
       select
         coalesce(sum(valor) filter (where situacao='A_RECEBER'),0)::float as a_receber,
-        coalesce(sum(valor) filter (where situacao='ATRASADO'),0)::float  as atrasado,
+        coalesce(sum(valor) filter (where situacao in ('ATRASADO','EXPIRADO')),0)::float  as atrasado,
         coalesce(sum(valor) filter (where situacao='RECEBIDO'),0)::float  as recebido
       from krv_cobrancas.cobrancas
       where ${condP.join(' and ')};`, paramsP);
@@ -118,13 +120,13 @@ export async function GET(req: NextRequest) {
     const serie = await client.query(`
       select to_char(vencimento,'YYYY-MM') as mes,
         coalesce(sum(valor) filter (where situacao='RECEBIDO'),0)::float as recebido,
-        coalesce(sum(valor) filter (where situacao='ATRASADO'),0)::float as atrasado,
+        coalesce(sum(valor) filter (where situacao in ('ATRASADO','EXPIRADO')),0)::float as atrasado,
         coalesce(sum(valor) filter (where situacao='A_RECEBER'),0)::float as a_receber,
         case
-          when coalesce(sum(valor) filter (where situacao in ('RECEBIDO','ATRASADO','A_RECEBER')),0) > 0
+          when coalesce(sum(valor) filter (where situacao in ('RECEBIDO','ATRASADO','EXPIRADO','A_RECEBER')),0) > 0
           then round(
-            100.0 * coalesce(sum(valor) filter (where situacao='ATRASADO'),0)
-            / coalesce(sum(valor) filter (where situacao in ('RECEBIDO','ATRASADO','A_RECEBER')),0)
+            100.0 * coalesce(sum(valor) filter (where situacao in ('ATRASADO','EXPIRADO')),0)
+            / coalesce(sum(valor) filter (where situacao in ('RECEBIDO','ATRASADO','EXPIRADO','A_RECEBER')),0)
           , 1)
           else 0
         end::float as inadimplencia
@@ -144,7 +146,7 @@ export async function GET(req: NextRequest) {
       with a as (
         select valor, (current_date - vencimento) as d
         from krv_cobrancas.cobrancas
-        where situacao='ATRASADO' and vencimento is not null and ${contaCond}
+        where situacao in ('ATRASADO','EXPIRADO') and vencimento is not null and ${contaCond}
       )
       select
         count(*) filter (where d between 1 and 30)::int  as f1_qtd,
@@ -159,27 +161,27 @@ export async function GET(req: NextRequest) {
         coalesce(sum(valor) filter (where d > 60),0)::float              as f5_val
       from a;`, contaParam);
 
-    // ---- TOP DEVEDORES: maior valor em aberto (ATRASADO + A_RECEBER) por cliente ----
+    // ---- TOP DEVEDORES: maior valor em aberto (ATRASADO + EXPIRADO + A_RECEBER) por cliente ----
     const topDevedores = await client.query(`
       select nome, documento,
         coalesce(sum(valor),0)::float as total_aberto,
-        coalesce(sum(valor) filter (where situacao='ATRASADO'),0)::float as atrasado,
+        coalesce(sum(valor) filter (where situacao in ('ATRASADO','EXPIRADO')),0)::float as atrasado,
         count(*)::int as qtd
       from krv_cobrancas.cobrancas
-      where situacao in ('ATRASADO','A_RECEBER') and ${contaCond}
+      where situacao in ('ATRASADO','EXPIRADO','A_RECEBER') and ${contaCond}
       group by nome, documento
       order by total_aberto desc
       limit 10;`, contaParam);
 
-    // ---- INADIMPLÊNCIA por EMPREENDIMENTO ----
+    // ---- INADIMPLÊNCIA por EMPREENDIMENTO (atrasado + expirado) ----
     const inadConta = await client.query(`
       select conta,
-        coalesce(sum(valor) filter (where situacao='ATRASADO'),0)::float as atrasado,
-        coalesce(sum(valor) filter (where situacao in ('RECEBIDO','ATRASADO','A_RECEBER')),0)::float as base,
+        coalesce(sum(valor) filter (where situacao in ('ATRASADO','EXPIRADO')),0)::float as atrasado,
+        coalesce(sum(valor) filter (where situacao in ('RECEBIDO','ATRASADO','EXPIRADO','A_RECEBER')),0)::float as base,
         case
-          when coalesce(sum(valor) filter (where situacao in ('RECEBIDO','ATRASADO','A_RECEBER')),0) > 0
-          then round(100.0 * coalesce(sum(valor) filter (where situacao='ATRASADO'),0)
-               / coalesce(sum(valor) filter (where situacao in ('RECEBIDO','ATRASADO','A_RECEBER')),0), 1)
+          when coalesce(sum(valor) filter (where situacao in ('RECEBIDO','ATRASADO','EXPIRADO','A_RECEBER')),0) > 0
+          then round(100.0 * coalesce(sum(valor) filter (where situacao in ('ATRASADO','EXPIRADO')),0)
+               / coalesce(sum(valor) filter (where situacao in ('RECEBIDO','ATRASADO','EXPIRADO','A_RECEBER')),0), 1)
           else 0
         end::float as inadimplencia
       from krv_cobrancas.cobrancas
