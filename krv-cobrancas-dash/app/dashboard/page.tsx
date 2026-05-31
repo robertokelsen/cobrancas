@@ -233,8 +233,9 @@ export default function Dashboard() {
 
   const inadimplencia = useMemo(() => {
     if (!metricas) return 0;
-    const base = metricas.valor_a_receber + metricas.valor_atrasado + metricas.valor_recebido;
-    return base > 0 ? (metricas.valor_atrasado / base) * 100 : 0;
+    const inadimplente = metricas.valor_atrasado + metricas.valor_expirado;
+    const base = metricas.valor_a_receber + inadimplente + metricas.valor_recebido;
+    return base > 0 ? (inadimplente / base) * 100 : 0;
   }, [metricas]);
 
   const dadosPie = useMemo(() => {
@@ -353,7 +354,7 @@ export default function Dashboard() {
           </div>
           <div className="bg-white rounded-xl shadow-sm p-4">
             <h3 className="text-sm font-medium text-gray-700 mb-1">Distribuição por situação (R$)</h3>
-            <p className="text-xs text-gray-400 mb-2">{mesVigente ? fmtMes(mesVigente) : 'mês vigente'}</p>
+            <p className="text-xs text-gray-400 mb-2">{mesVigente ? fmtMes(mesVigente) : 'mês vigente'} · atrasado inclui expirados</p>
             <ResponsiveContainer width="100%" height={216}>
               <PieChart>
                 <Pie data={dadosPie} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={80} label={(e:any)=>e.name}>
@@ -369,7 +370,7 @@ export default function Dashboard() {
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
           <div className="bg-white rounded-xl shadow-sm p-4">
             <h3 className="text-sm font-medium text-gray-700 mb-1">Aging de atrasados (dias)</h3>
-            <p className="text-xs text-gray-400 mb-3">Valor em aberto por faixa de atraso</p>
+            <p className="text-xs text-gray-400 mb-3">Valor em aberto por faixa de atraso · inclui expirados (60+)</p>
             <ResponsiveContainer width="100%" height={220}>
               <BarChart data={agingData}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} />
