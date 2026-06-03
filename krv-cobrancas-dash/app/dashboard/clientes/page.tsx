@@ -1,10 +1,10 @@
 'use client';
-// app/dashboard/clientes/page.tsx — classificação por cliente (tabela real cobrancas).
+// app/dashboard/clientes/page.tsx — classificação por cliente, com TRAVA de override manual.
 import { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 
 type Cliente = {
-  documento: string; nome: string; classificacao: string | null;
+  documento: string; nome: string; classificacao: string | null; bloqueado: boolean;
   qtd_total: number; pagos: number; em_atraso: number;
   valor_em_atraso: number; valor_aberto: number;
 };
@@ -47,14 +47,15 @@ export default function ClientesPage() {
   }, [buscaDeb, classe, page, router]);
   useEffect(() => { carregar(); }, [carregar]);
 
-  const setClassificacao = async (doc: string, valor: string) => {
+  // valor especial "__auto__" = destravar; senão, trava no valor escolhido
+  const aoEscolher = async (doc: string, valor: string) => {
     if (!valor) return;
+    const body = valor === '__auto__' ? { documento: doc, unlock: true } : { documento: doc, classificacao: valor };
     try {
       const r = await fetch('/api/classificacao', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ documento: doc, classificacao: valor }),
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
       });
-      mostrar(r.ok ? 'Classificação alterada.' : 'Falha ao salvar.');
+      mostrar(r.ok ? (valor === '__auto__' ? 'Destravado (volta ao automático).' : 'Travado na classificação manual.') : 'Falha ao salvar.');
       if (r.ok) carregar();
     } catch { mostrar('Erro ao salvar.'); }
   };
@@ -70,7 +71,7 @@ export default function ClientesPage() {
           <div>
             <a href="/dashboard" className="text-sm text-indigo-600 hover:underline">← Voltar ao dashboard</a>
             <h1 className="text-2xl font-bold text-gray-900 mt-1">Classificação de clientes</h1>
-            <p className="text-sm text-gray-500">Define a régua que cada cliente recebe.</p>
+            <p className="text-sm text-gray-500">Define a régua que cada cliente recebe. 🔒 = travado na mão (o automático não sobrescreve).</p>
           </div>
         </div>
 
@@ -98,7 +99,7 @@ export default function ClientesPage() {
                 <th className="py-2 px-3 font-medium text-center">Histórico</th>
                 <th className="py-2 px-3 font-medium text-right">Em atraso</th>
                 <th className="py-2 px-3 font-medium">Classificação</th>
-                <th className="py-2 px-3 font-medium">Alterar</th>
+                <th className="py-2 px-3 font-medium">Definir</th>
               </tr>
             </thead>
             <tbody>
@@ -114,14 +115,16 @@ export default function ClientesPage() {
                   </td>
                   <td className="py-2 px-3 text-center text-xs text-gray-600">{c.pagos}/{c.qtd_total} pagos</td>
                   <td className="py-2 px-3 text-right tabular-nums text-red-600">{c.em_atraso > 0 ? brl(c.valor_em_atraso) : '—'}</td>
-                  <td className="py-2 px-3">
+                  <td className="py-2 px-3 whitespace-nowrap">
                     <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${cor(c.classificacao)}`}>{c.classificacao || '—'}</span>
+                    <span className="ml-1 text-[10px] text-gray-400">{c.bloqueado ? '🔒 manual' : 'auto'}</span>
                   </td>
                   <td className="py-2 px-3">
-                    <select value="" onChange={(e) => setClassificacao(c.documento, e.target.value)}
+                    <select value="" onChange={(e) => aoEscolher(c.documento, e.target.value)}
                       className="border border-gray-300 rounded px-2 py-1 text-xs">
-                      <option value="">alterar…</option>
-                      {CLASSES.map(x => <option key={x.k} value={x.k}>{x.k}</option>)}
+                      <option value="">definir…</option>
+                      {CLASSES.map(x => <option key={x.k} value={x.k}>Travar: {x.k}</option>)}
+                      {c.bloqueado && <option value="__auto__">↩ Voltar ao automático</option>}
                     </select>
                   </td>
                 </tr>
