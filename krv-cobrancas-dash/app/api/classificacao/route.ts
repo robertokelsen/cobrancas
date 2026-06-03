@@ -1,6 +1,8 @@
-// app/api/classificacao/route.ts — classificação por cliente, na tabela real cobrancas.
-// GET  -> lista clientes (agrupados por documento) com a classificação e histórico
-// POST -> override manual: { documento, classificacao } (um dos 3 rótulos oficiais)
+// app/api/classificacao/route.ts — classificação por cliente (tabela real cobrancas)
+// com TRAVA de override manual (krv_cobrancas.classificacao_lock + trigger no banco).
+// GET  -> lista clientes com classificação, histórico e se está travado (manual)
+// POST -> { documento, classificacao }      => trava no valor manual
+//         { documento, unlock: true }        => destrava (volta ao automático)
 import { NextRequest, NextResponse } from 'next/server';
 import { cobrancasPool } from '@/lib/cobrancasDb';
 
@@ -26,20 +28,23 @@ export async function GET(req: NextRequest) {
   const client = await cobrancasPool.connect();
   try {
     const lista = await client.query(`
-      select documento,
-             max(nome) as nome,
-             max(classificacao) as classificacao,
-             count(*)::int as qtd_total,
-             count(*) filter (where situacao in ('RECEBIDO','MARCADO_RECEBIDO'))::int as pagos,
-             count(*) filter (where situacao in ('ATRASADO','EXPIRADO'))::int as em_atraso,
-             coalesce(sum(valor) filter (where situacao in ('ATRASADO','EXPIRADO')),0)::float as valor_em_atraso,
-             coalesce(sum(valor) filter (where situacao in ('A_RECEBER','ATRASADO','EXPIRADO')),0)::float as valor_aberto
-        from krv_cobrancas.cobrancas
-        ${where}
-        group by documento
-        order by (max(classificacao)='Mau pagador') desc,
-                 coalesce(sum(valor) filter (where situacao in ('ATRASADO','EXPIRADO')),0) desc,
-                 max(nome) asc
+      with base as (
+        select documento,
+               max(nome) as nome,
+               max(classificacao) as classificacao,
+               count(*)::int as qtd_total,
+               count(*) filter (where situacao in ('RECEBIDO','MARCADO_RECEBIDO'))::int as pagos,
+               count(*) filter (where situacao in ('ATRASADO','EXPIRADO'))::int as em_atraso,
+               coalesce(sum(valor) filter (where situacao in ('ATRASADO','EXPIRADO')),0)::float as valor_em_atraso,
+               coalesce(sum(valor) filter (where situacao in ('A_RECEBER','ATRASADO','EXPIRADO')),0)::float as valor_aberto
+          from krv_cobrancas.cobrancas
+          ${where}
+          group by documento
+      )
+      select b.*, (l.documento is not null) as bloqueado
+        from base b
+        left join krv_cobrancas.classificacao_lock l on l.documento = b.documento
+        order by (b.classificacao='Mau pagador') desc, b.valor_em_atraso desc, b.nome asc
         limit $${i++} offset $${i++};`, [...params, pageSize, offset]);
 
     const tot = await client.query(
@@ -63,23 +68,31 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  const { documento, classificacao } = await req.json().catch(() => ({}));
+  const { documento, classificacao, unlock } = await req.json().catch(() => ({}));
   const doc = String(documento || '').trim();
-  const classe = String(classificacao || '').trim();
   if (!doc) return NextResponse.json({ error: 'documento é obrigatório' }, { status: 400 });
-  if (!CLASSES.includes(classe)) return NextResponse.json({ error: 'classificação inválida' }, { status: 400 });
 
   const client = await cobrancasPool.connect();
   try {
+    if (unlock) {
+      // destrava: o automático volta a mandar (recalcula no próximo evento do n8n)
+      await client.query(`delete from krv_cobrancas.classificacao_lock where documento=$1;`, [doc]);
+      return NextResponse.json({ ok: true, modo: 'auto' });
+    }
+    const classe = String(classificacao || '').trim();
+    if (!CLASSES.includes(classe)) return NextResponse.json({ error: 'classificação inválida' }, { status: 400 });
+
+    // trava no valor manual: a trigger garante que ninguém sobrescreve
+    await client.query(
+      `insert into krv_cobrancas.classificacao_lock (documento, classificacao, atualizado_em, atualizado_por)
+       values ($1,$2,now(),'dashboard')
+       on conflict (documento) do update
+         set classificacao=excluded.classificacao, atualizado_em=now(), atualizado_por='dashboard';`,
+      [doc, classe]);
+    // aplica já nos boletos do cliente (a trigger manteria mesmo sem isto)
     const r = await client.query(
       `update krv_cobrancas.cobrancas set classificacao=$2 where documento=$1;`, [doc, classe]);
-    // espelha na tabela clientes (caso seu fluxo a utilize)
-    await client.query(
-      `insert into krv_cobrancas.clientes (documento, nome, classificacao, atualizado_em)
-       values ($1, (select max(nome) from krv_cobrancas.cobrancas where documento=$1), $2, now())
-       on conflict (documento) do update set classificacao=excluded.classificacao, atualizado_em=now();`,
-      [doc, classe]).catch(() => {});
-    return NextResponse.json({ ok: true, classificacao: classe, boletos: r.rowCount });
+    return NextResponse.json({ ok: true, modo: 'manual', classificacao: classe, boletos: r.rowCount });
   } catch (e: any) {
     console.error('POST /api/classificacao:', e);
     return NextResponse.json({ error: 'Falha ao salvar', detail: String(e?.message || e) }, { status: 500 });
