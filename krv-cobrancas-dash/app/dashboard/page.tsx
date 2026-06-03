@@ -282,6 +282,8 @@ export default function Dashboard() {
         <div className="flex items-center justify-between mb-6">
           <h1 className="text-2xl font-bold text-gray-900">Boletos — Cobrança</h1>
           <div className="flex gap-2">
+            <a href="/dashboard/regua" className="px-4 py-2 bg-white border border-gray-300 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-50">Régua</a>
+            <a href="/dashboard/clientes" className="px-4 py-2 bg-white border border-gray-300 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-50">Clientes</a>
             <button onClick={carregar} className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700">Atualizar</button>
             <button onClick={sair} className="px-4 py-2 bg-gray-100 text-gray-600 rounded-lg text-sm hover:bg-gray-200">Sair</button>
           </div>
