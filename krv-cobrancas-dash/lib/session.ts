@@ -1,5 +1,4 @@
-// lib/session.ts — sessão simples por cookie assinado (HMAC SHA-256).
-// Sem libs externas: usa o crypto nativo do Node. Suficiente para senha única de equipe.
+// lib/session.ts — sessão por cookie assinado (HMAC SHA-256), agora com papel (role).
 import crypto from 'crypto';
 
 const COOKIE_NAME = 'krv_dash_session';
@@ -11,9 +10,11 @@ function secret() {
   return s;
 }
 
+export type Role = 'full' | 'maint';
+
 // token = base64(payload).assinatura
-export function criarToken(): string {
-  const payload = JSON.stringify({ ok: true, exp: Date.now() + MAX_AGE * 1000 });
+export function criarToken(role: Role = 'full'): string {
+  const payload = JSON.stringify({ ok: true, role, exp: Date.now() + MAX_AGE * 1000 });
   const b64 = Buffer.from(payload).toString('base64url');
   const sig = crypto.createHmac('sha256', secret()).update(b64).digest('base64url');
   return `${b64}.${sig}`;
@@ -24,7 +25,6 @@ export function validarToken(token: string | undefined): boolean {
   const [b64, sig] = token.split('.');
   if (!b64 || !sig) return false;
   const esperado = crypto.createHmac('sha256', secret()).update(b64).digest('base64url');
-  // comparação em tempo constante
   const a = Buffer.from(sig); const b = Buffer.from(esperado);
   if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return false;
   try {
