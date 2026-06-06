@@ -14,10 +14,16 @@ export async function POST(req: NextRequest) {
   if (!ok) return NextResponse.json({ error: 'Senha incorreta' }, { status: 401 });
 
   const manter = lembrar === true;
+  const maxAge = manter ? SESSION_MAX_AGE_LEMBRAR : SESSION_MAX_AGE;
   const res = NextResponse.json({ ok: true });
+  // Max-Age + Expires explícitos => cookie persistente (sobrevive a fechar/reabrir o navegador).
   res.cookies.set(SESSION_COOKIE, criarToken('full', manter), {
-    httpOnly: true, secure: true, sameSite: 'lax', path: '/',
-    maxAge: manter ? SESSION_MAX_AGE_LEMBRAR : SESSION_MAX_AGE,
+    httpOnly: true,
+    secure: true,
+    sameSite: 'lax',
+    path: '/',
+    maxAge,
+    expires: new Date(Date.now() + maxAge * 1000),
   });
   return res;
 }
