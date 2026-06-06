@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 
 export default function Login() {
   const [senha, setSenha] = useState('');
+  const [lembrar, setLembrar] = useState(false);
   const [erro, setErro] = useState('');
   const [carregando, setCarregando] = useState(false);
   const router = useRouter();
@@ -16,7 +17,7 @@ export default function Login() {
       const res = await fetch('/api/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ senha }),
+        body: JSON.stringify({ senha, lembrar }),
       });
       if (!res.ok) { setErro('Senha incorreta.'); return; }
       router.push('/dashboard');
@@ -34,11 +35,19 @@ export default function Login() {
         <input type="password" value={senha} onChange={(e) => setSenha(e.target.value)}
           placeholder="Senha" autoFocus
           className="w-full border rounded-lg px-3 py-2 mb-3 text-sm" />
+        <label className="flex items-center gap-2 mb-3 text-sm text-gray-600 select-none cursor-pointer">
+          <input type="checkbox" checked={lembrar} onChange={(e) => setLembrar(e.target.checked)}
+            className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500" />
+          Manter conectado neste computador (30 dias)
+        </label>
         {erro && <div className="text-red-600 text-sm mb-3">{erro}</div>}
         <button type="submit" disabled={carregando}
           className="w-full bg-indigo-600 text-white rounded-lg py-2 text-sm font-medium hover:bg-indigo-700 disabled:opacity-50">
           {carregando ? 'Entrando...' : 'Entrar'}
         </button>
+        <p className="text-[11px] text-gray-400 mt-4 leading-snug">
+          Marque a caixa só nas suas máquinas. Em computador compartilhado, deixe desmarcado.
+        </p>
       </form>
     </div>
   );
