@@ -1,14 +1,35 @@
 'use client';
-// app/login/page.tsx
-import { useState } from 'react';
+// app/login/page.tsx — login + auto-login (token em localStorage religa a sessão ao reabrir).
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
+
+const KEEP_KEY = 'krv_keep';
 
 export default function Login() {
   const [senha, setSenha] = useState('');
-  const [lembrar, setLembrar] = useState(false);
+  const [lembrar, setLembrar] = useState(true);
   const [erro, setErro] = useState('');
   const [carregando, setCarregando] = useState(false);
+  const [restaurando, setRestaurando] = useState(true);
   const router = useRouter();
+
+  // Auto-login: se há token guardado, religa a sessão e entra direto.
+  useEffect(() => {
+    const tok = typeof window !== 'undefined' ? localStorage.getItem(KEEP_KEY) : null;
+    if (!tok) { setRestaurando(false); return; }
+    (async () => {
+      try {
+        const res = await fetch('/api/session', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token: tok }),
+        });
+        if (res.ok) { router.replace('/dashboard'); router.refresh(); return; }
+        localStorage.removeItem(KEEP_KEY);
+      } catch { /* cai para login manual */ }
+      setRestaurando(false);
+    })();
+  }, [router]);
 
   async function entrar(e: React.FormEvent) {
     e.preventDefault();
@@ -20,11 +41,22 @@ export default function Login() {
         body: JSON.stringify({ senha, lembrar }),
       });
       if (!res.ok) { setErro('Senha incorreta.'); return; }
+      const data = await res.json().catch(() => ({} as any));
+      if (lembrar && data?.token) localStorage.setItem(KEEP_KEY, data.token);
+      else localStorage.removeItem(KEEP_KEY);
       router.push('/dashboard');
       router.refresh();
     } catch {
       setErro('Erro ao entrar. Tente novamente.');
     } finally { setCarregando(false); }
+  }
+
+  if (restaurando) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-indigo-600 to-purple-700 p-4">
+        <div className="text-white/90 text-sm">Entrando…</div>
+      </div>
+    );
   }
 
   return (
