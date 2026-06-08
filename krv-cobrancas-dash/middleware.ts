@@ -6,7 +6,7 @@ export const config = {
   matcher: ['/((?!_next/static|_next/image|favicon.ico).*)'],
 };
 
-const PUBLICAS = ['/login', '/api/login', '/devedores/login', '/api/devedores/login'];
+const PUBLICAS = ['/login', '/api/login', '/api/session', '/devedores/login', '/api/devedores/login'];
 
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
