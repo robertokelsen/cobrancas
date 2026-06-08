@@ -1,4 +1,4 @@
-// app/api/login/route.ts — login do dashboard (papel 'full'). Suporta "manter conectado" (30 dias).
+// app/api/login/route.ts — login do dashboard (papel 'full'). "Manter conectado" (30 dias) + token p/ auto-login.
 import { NextRequest, NextResponse } from 'next/server';
 import crypto from 'crypto';
 import { criarToken, SESSION_COOKIE, SESSION_MAX_AGE, SESSION_MAX_AGE_LEMBRAR } from '@/lib/session';
@@ -15,9 +15,10 @@ export async function POST(req: NextRequest) {
 
   const manter = lembrar === true;
   const maxAge = manter ? SESSION_MAX_AGE_LEMBRAR : SESSION_MAX_AGE;
-  const res = NextResponse.json({ ok: true });
-  // Max-Age + Expires explícitos => cookie persistente (sobrevive a fechar/reabrir o navegador).
-  res.cookies.set(SESSION_COOKIE, criarToken('full', manter), {
+  const token = criarToken('full', manter);
+  // Quando "manter conectado", devolve o token para o cliente guardar (auto-login no reabrir).
+  const res = NextResponse.json({ ok: true, token: manter ? token : null });
+  res.cookies.set(SESSION_COOKIE, token, {
     httpOnly: true,
     secure: true,
     sameSite: 'lax',
