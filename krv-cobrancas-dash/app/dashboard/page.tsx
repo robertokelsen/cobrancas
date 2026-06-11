@@ -6,6 +6,10 @@ import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend,
   PieChart, Pie, Cell, CartesianGrid, ComposedChart, Line,
 } from 'recharts';
+import GridLayout, { WidthProvider } from 'react-grid-layout';
+import 'react-grid-layout/css/styles.css';
+import 'react-resizable/css/styles.css';
+const Grid: any = WidthProvider(GridLayout as any);
 
 const CONTAS = [
   { id: '360597122', nome: 'Mansões do Lago' },
@@ -85,6 +89,25 @@ const CORES_PIE: Record<string, string> = {
   A_RECEBER: '#3b82f6', ATRASADO: '#ef4444', RECEBIDO: '#22c55e',
 };
 
+function PanelCard({ title, subtitle, collapsed, onToggle, onMax, children }: { title: string; subtitle?: string; collapsed: boolean; onToggle: () => void; onMax: () => void; children: any }) {
+  return (
+    <div className="bg-white rounded-xl shadow-sm flex flex-col h-full overflow-hidden">
+      <div className="panel-drag flex items-center gap-2 px-3 py-2 border-b border-gray-100 cursor-move select-none">
+        <span className="text-gray-300" title="Arraste para reordenar">⠇</span>
+        <div className="min-w-0">
+          <h3 className="text-sm font-medium text-gray-700 truncate">{title}</h3>
+          {subtitle ? <p className="text-[11px] text-gray-400 truncate">{subtitle}</p> : null}
+        </div>
+        <div className="no-drag ml-auto flex items-center gap-1">
+          <button onClick={onToggle} className="px-1.5 text-gray-400 hover:text-gray-700" title={collapsed ? 'Expandir' : 'Recolher'}>{collapsed ? '▾' : '▴'}</button>
+          <button onClick={onMax} className="px-1.5 text-gray-400 hover:text-krv" title="Maximizar">⛶</button>
+        </div>
+      </div>
+      {!collapsed && <div className="flex-1 min-h-0 p-3">{children}</div>}
+    </div>
+  );
+}
+
 export default function Dashboard() {
   const router = useRouter();
   const [contasSel, setContasSel] = useState<string[]>(CONTAS.map(c => c.id));
@@ -122,6 +145,27 @@ export default function Dashboard() {
   // seleção em lote
   const [selecionados, setSelecionados] = useState<Set<string>>(new Set());
   const [enviandoLote, setEnviandoLote] = useState(false);
+
+  // Dashboard personalizavel (arrastar / redimensionar / recolher / maximizar) - cards analiticos
+  const DEF_LAYOUT: any[] = [
+    { i: 'evolucao', x: 0, y: 0, w: 8, h: 11 },
+    { i: 'distribuicao', x: 8, y: 0, w: 4, h: 11 },
+    { i: 'aging', x: 0, y: 11, w: 6, h: 10 },
+    { i: 'inadimplencia', x: 6, y: 11, w: 6, h: 10 },
+    { i: 'devedores', x: 0, y: 21, w: 12, h: 11 },
+  ];
+  const [layout, setLayout] = useState<any[]>(DEF_LAYOUT);
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
+  const [maximized, setMaximized] = useState<string | null>(null);
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => {
+    setMounted(true);
+    try {
+      const sv = localStorage.getItem('krv_dash_layout'); if (sv) setLayout(JSON.parse(sv));
+      const cv = localStorage.getItem('krv_dash_collapsed'); if (cv) setCollapsed(JSON.parse(cv));
+    } catch {}
+  }, []);
+  const toggleCol = (id: string) => setCollapsed((prev: any) => { const n = { ...prev, [id]: !prev[id] }; try { localStorage.setItem('krv_dash_collapsed', JSON.stringify(n)); } catch {} return n; });
 
   useEffect(() => {
     const t = setTimeout(() => { setBuscaDeb(busca); setPage(1); }, 400);
@@ -273,6 +317,92 @@ export default function Dashboard() {
     return 'text-red-600 font-semibold';
   };
 
+  const analiseCards = [
+    { id: 'evolucao', title: 'Evolução mensal — Recebido vs Atrasado vs Inadimplência', sub: '', body: (
+      <ResponsiveContainer width="100%" height="100%">
+        <ComposedChart data={serieFmt}>
+          <CartesianGrid strokeDasharray="3 3" vertical={false} />
+          <XAxis dataKey="label" fontSize={12} />
+          <YAxis yAxisId="left" fontSize={11} tickFormatter={(v) => v >= 1000 ? `${(v/1000).toFixed(0)}k` : String(v)} />
+          <YAxis yAxisId="right" orientation="right" fontSize={11} tickFormatter={(v) => `${v}%`} domain={[0, 100]} />
+          <Tooltip formatter={(v: any, n: any) => n === 'Inadimplência' ? `${v}%` : brl(v)} />
+          <Legend />
+          <Bar yAxisId="left" dataKey="recebido" name="Recebido" fill="#22c55e" radius={[4,4,0,0]} />
+          <Bar yAxisId="left" dataKey="atrasado" name="Atrasado" fill="#ef4444" radius={[4,4,0,0]} />
+          <Line yAxisId="right" type="monotone" dataKey="inadimplencia" name="Inadimplência" stroke="#f59e0b" strokeWidth={2} dot={{ r: 3 }} />
+        </ComposedChart>
+      </ResponsiveContainer>
+    ) },
+    { id: 'distribuicao', title: 'Distribuição por situação (R$)', sub: (mesVigente ? fmtMes(mesVigente) : 'mês vigente') + ' · atrasado inclui expirados', body: (
+      <ResponsiveContainer width="100%" height="100%">
+        <PieChart>
+          <Pie data={dadosPie} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={80} label={(e:any)=>e.name}>
+            {dadosPie.map((d) => <Cell key={d.name} fill={CORES_PIE[d.name] || '#999'} />)}
+          </Pie>
+          <Tooltip formatter={(v: any) => brl(v)} />
+        </PieChart>
+      </ResponsiveContainer>
+    ) },
+    { id: 'aging', title: 'Aging de atrasados (dias)', sub: 'Valor em aberto por faixa de atraso · inclui expirados (60+)', body: (
+      <ResponsiveContainer width="100%" height="100%">
+        <BarChart data={agingData}>
+          <CartesianGrid strokeDasharray="3 3" vertical={false} />
+          <XAxis dataKey="faixa" fontSize={12} />
+          <YAxis fontSize={11} tickFormatter={(v) => v >= 1000 ? `${(v/1000).toFixed(0)}k` : String(v)} />
+          <Tooltip formatter={(v: any, _n: any, p: any) => [`${brl(v)} · ${p?.payload?.qtd} boleto(s)`, 'Atrasado']} />
+          <Bar dataKey="valor" radius={[4,4,0,0]}>
+            {agingData.map((_, idx) => <Cell key={idx} fill={CORES_AGING[idx]} />)}
+          </Bar>
+        </BarChart>
+      </ResponsiveContainer>
+    ) },
+    { id: 'inadimplencia', title: 'Inadimplência por empreendimento', sub: '% do valor da carteira em atraso', body: (
+      <ResponsiveContainer width="100%" height="100%">
+        <BarChart data={inadContaData} layout="vertical" margin={{ left: 20 }}>
+          <CartesianGrid strokeDasharray="3 3" horizontal={false} />
+          <XAxis type="number" fontSize={11} tickFormatter={(v) => `${v}%`} domain={[0, 100]} />
+          <YAxis type="category" dataKey="nome" fontSize={11} width={110} />
+          <Tooltip formatter={(v: any, _n: any, p: any) => [`${v}% · ${brl(p?.payload?.atrasado)} em atraso`, 'Inadimplência']} />
+          <Bar dataKey="inadimplencia" radius={[0,4,4,0]}>
+            {inadContaData.map((c, idx) => (
+              <Cell key={idx} fill={c.inadimplencia > 20 ? '#ef4444' : c.inadimplencia > 10 ? '#f59e0b' : '#22c55e'} />
+            ))}
+          </Bar>
+        </BarChart>
+      </ResponsiveContainer>
+    ) },
+    { id: 'devedores', title: 'Top 10 devedores', sub: 'Maior valor em aberto (atrasado + a receber)', body: (
+      <div className="overflow-auto h-full">
+        <table className="w-full text-sm">
+          <thead className="text-gray-500 text-left text-xs"><tr>
+            <th className="py-2 font-medium">#</th><th className="py-2 font-medium">Cliente</th>
+            <th className="py-2 font-medium text-right">Em atraso</th><th className="py-2 font-medium text-right">Total aberto</th>
+            <th className="py-2 font-medium text-center">Boletos</th>
+          </tr></thead>
+          <tbody className="divide-y divide-gray-100">
+            {topDevedores.map((d, idx) => (
+              <tr key={d.documento || idx} className="hover:bg-gray-50">
+                <td className="py-2 text-gray-400">{idx + 1}</td>
+                <td className="py-2">
+                  <button onClick={() => { setBusca(d.documento || d.nome); }} className="font-medium text-gray-900 hover:text-krv text-left">{d.nome || '—'}</button>
+                  <div className="text-xs text-gray-400">{d.documento}</div>
+                </td>
+                <td className="py-2 text-right tabular-nums text-red-600">{brl(d.atrasado)}</td>
+                <td className="py-2 text-right tabular-nums font-semibold text-gray-900">{brl(d.total_aberto)}</td>
+                <td className="py-2 text-center text-gray-500">{d.qtd}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    ) },
+  ];
+  const renderLayout = layout.map((it: any) => collapsed[it.i] ? { ...it, h: 1, minH: 1, maxH: 1 } : { ...it, minH: 2 });
+  const onLayoutChange = (l: any[]) => {
+    const merged = l.map((it: any) => collapsed[it.i] ? { ...it, h: (layout.find((x: any) => x.i === it.i)?.h ?? it.h) } : it);
+    setLayout(merged);
+    try { localStorage.setItem('krv_dash_layout', JSON.stringify(merged)); } catch {}
+  };
   return (
     <div className="min-h-screen bg-gray-50 p-6">
       {toast && (
@@ -336,111 +466,35 @@ export default function Dashboard() {
           )}
         </div>
 
-        {/* Gráficos */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">
-          <div className="bg-white rounded-xl shadow-sm p-4 lg:col-span-2">
-            <h3 className="text-sm font-medium text-gray-700 mb-3">Evolução mensal — Recebido vs Atrasado vs Inadimplência</h3>
-            <ResponsiveContainer width="100%" height={240}>
-              <ComposedChart data={serieFmt}>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                <XAxis dataKey="label" fontSize={12} />
-                <YAxis yAxisId="left" fontSize={11} tickFormatter={(v) => v >= 1000 ? `${(v/1000).toFixed(0)}k` : String(v)} />
-                <YAxis yAxisId="right" orientation="right" fontSize={11} tickFormatter={(v) => `${v}%`} domain={[0, 100]} />
-                <Tooltip formatter={(v: any, n: any) => n === 'Inadimplência' ? `${v}%` : brl(v)} />
-                <Legend />
-                <Bar yAxisId="left" dataKey="recebido" name="Recebido" fill="#22c55e" radius={[4,4,0,0]} />
-                <Bar yAxisId="left" dataKey="atrasado" name="Atrasado" fill="#ef4444" radius={[4,4,0,0]} />
-                <Line yAxisId="right" type="monotone" dataKey="inadimplencia" name="Inadimplência" stroke="#f59e0b" strokeWidth={2} dot={{ r: 3 }} />
-              </ComposedChart>
-            </ResponsiveContainer>
-          </div>
-          <div className="bg-white rounded-xl shadow-sm p-4">
-            <h3 className="text-sm font-medium text-gray-700 mb-1">Distribuição por situação (R$)</h3>
-            <p className="text-xs text-gray-400 mb-2">{mesVigente ? fmtMes(mesVigente) : 'mês vigente'} · atrasado inclui expirados</p>
-            <ResponsiveContainer width="100%" height={216}>
-              <PieChart>
-                <Pie data={dadosPie} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={80} label={(e:any)=>e.name}>
-                  {dadosPie.map((d) => <Cell key={d.name} fill={CORES_PIE[d.name] || '#999'} />)}
-                </Pie>
-                <Tooltip formatter={(v: any) => brl(v)} />
-              </PieChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
+        {/* Cards analíticos (arrastar / redimensionar / recolher / maximizar) */}
+        <p className="text-[11px] text-gray-400 mb-1">Arraste pelo cabeçalho para reordenar · alça no canto p/ redimensionar · ▴ recolhe · ⛶ maximiza</p>
+        {mounted ? (
+          <Grid className="layout mb-6" layout={renderLayout} cols={12} rowHeight={26} margin={[16, 16]} containerPadding={[0, 0]} draggableHandle=".panel-drag" draggableCancel=".no-drag" resizeHandles={['se']} onLayoutChange={onLayoutChange}>
+            {analiseCards.map((c) => (
+              <div key={c.id}>
+                <PanelCard title={c.title} subtitle={c.sub} collapsed={!!collapsed[c.id]} onToggle={() => toggleCol(c.id)} onMax={() => setMaximized(c.id)}>
+                  {c.body}
+                </PanelCard>
+              </div>
+            ))}
+          </Grid>
+        ) : <div className="mb-6 text-xs text-gray-400">Carregando painéis…</div>}
 
-        {/* Aging + Inadimplência por empreendimento */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
-          <div className="bg-white rounded-xl shadow-sm p-4">
-            <h3 className="text-sm font-medium text-gray-700 mb-1">Aging de atrasados (dias)</h3>
-            <p className="text-xs text-gray-400 mb-3">Valor em aberto por faixa de atraso · inclui expirados (60+)</p>
-            <ResponsiveContainer width="100%" height={220}>
-              <BarChart data={agingData}>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                <XAxis dataKey="faixa" fontSize={12} />
-                <YAxis fontSize={11} tickFormatter={(v) => v >= 1000 ? `${(v/1000).toFixed(0)}k` : String(v)} />
-                <Tooltip formatter={(v: any, _n: any, p: any) => [`${brl(v)} · ${p?.payload?.qtd} boleto(s)`, 'Atrasado']} />
-                <Bar dataKey="valor" radius={[4,4,0,0]}>
-                  {agingData.map((_, idx) => <Cell key={idx} fill={CORES_AGING[idx]} />)}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-          <div className="bg-white rounded-xl shadow-sm p-4">
-            <h3 className="text-sm font-medium text-gray-700 mb-1">Inadimplência por empreendimento</h3>
-            <p className="text-xs text-gray-400 mb-3">% do valor da carteira em atraso</p>
-            <ResponsiveContainer width="100%" height={220}>
-              <BarChart data={inadContaData} layout="vertical" margin={{ left: 20 }}>
-                <CartesianGrid strokeDasharray="3 3" horizontal={false} />
-                <XAxis type="number" fontSize={11} tickFormatter={(v) => `${v}%`} domain={[0, 100]} />
-                <YAxis type="category" dataKey="nome" fontSize={11} width={110} />
-                <Tooltip formatter={(v: any, _n: any, p: any) => [`${v}% · ${brl(p?.payload?.atrasado)} em atraso`, 'Inadimplência']} />
-                <Bar dataKey="inadimplencia" radius={[0,4,4,0]}>
-                  {inadContaData.map((c, idx) => (
-                    <Cell key={idx} fill={c.inadimplencia > 20 ? '#ef4444' : c.inadimplencia > 10 ? '#f59e0b' : '#22c55e'} />
-                  ))}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
-
-        {/* Top devedores */}
-        {topDevedores.length > 0 && (
-          <div className="bg-white rounded-xl shadow-sm p-4 mb-6">
-            <h3 className="text-sm font-medium text-gray-700 mb-1">Top 10 devedores</h3>
-            <p className="text-xs text-gray-400 mb-3">Maior valor em aberto (atrasado + a receber)</p>
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead className="text-gray-500 text-left text-xs">
-                  <tr>
-                    <th className="py-2 font-medium">#</th>
-                    <th className="py-2 font-medium">Cliente</th>
-                    <th className="py-2 font-medium text-right">Em atraso</th>
-                    <th className="py-2 font-medium text-right">Total aberto</th>
-                    <th className="py-2 font-medium text-center">Boletos</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-100">
-                  {topDevedores.map((d, idx) => (
-                    <tr key={d.documento || idx} className="hover:bg-gray-50">
-                      <td className="py-2 text-gray-400">{idx + 1}</td>
-                      <td className="py-2">
-                        <button onClick={() => { setBusca(d.documento || d.nome); }}
-                          className="font-medium text-gray-900 hover:text-krv text-left">
-                          {d.nome || '—'}
-                        </button>
-                        <div className="text-xs text-gray-400">{d.documento}</div>
-                      </td>
-                      <td className="py-2 text-right tabular-nums text-red-600">{brl(d.atrasado)}</td>
-                      <td className="py-2 text-right tabular-nums font-semibold text-gray-900">{brl(d.total_aberto)}</td>
-                      <td className="py-2 text-center text-gray-500">{d.qtd}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+        {maximized && (() => {
+          const c = analiseCards.find((x) => x.id === maximized);
+          if (!c) return null;
+          return (
+            <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4 sm:p-8" onClick={() => setMaximized(null)}>
+              <div className="bg-white rounded-xl shadow-2xl w-full max-w-6xl h-[85vh] flex flex-col overflow-hidden" onClick={(e) => e.stopPropagation()}>
+                <div className="flex items-center gap-2 px-4 py-3 border-b border-gray-100">
+                  <h3 className="text-sm font-semibold text-gray-800">{c.title}</h3>
+                  <button onClick={() => setMaximized(null)} className="ml-auto text-gray-400 hover:text-gray-700 text-lg leading-none">✕</button>
+                </div>
+                <div className="flex-1 min-h-0 p-4">{c.body}</div>
+              </div>
             </div>
-          </div>
-        )}
+          );
+        })()}
 
         {/* Filtros */}
         <div className="bg-white rounded-xl shadow-sm p-4 mb-4">
