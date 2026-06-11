@@ -11,6 +11,8 @@ const PUBLICAS = ['/login', '/api/login', '/api/session', '/devedores/login', '/
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
   if (PUBLICAS.includes(pathname)) return NextResponse.next();
+  // assets estáticos (logo, favicon, imagens) nunca passam pelo gate de auth
+  if (/\.(png|jpe?g|svg|ico|webp|gif|css|js|woff2?)$/i.test(pathname)) return NextResponse.next();
 
   const token = req.cookies.get(SESSION_COOKIE)?.value;
   const secret = process.env.SESSION_SECRET || '';
