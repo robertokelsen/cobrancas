@@ -69,7 +69,7 @@ export default function ClientesPage() {
       <div className="max-w-6xl mx-auto">
         <div className="flex items-center justify-between mb-6">
           <div>
-            <a href="/dashboard" className="text-sm text-indigo-600 hover:underline">← Voltar ao dashboard</a>
+            <a href="/dashboard" className="text-sm text-krv hover:underline">← Voltar ao dashboard</a>
             <h1 className="text-2xl font-bold text-gray-900 mt-1">Classificação de clientes</h1>
             <p className="text-sm text-gray-500">Define a régua que cada cliente recebe. 🔒 = travado na mão (o automático não sobrescreve).</p>
           </div>
@@ -78,7 +78,7 @@ export default function ClientesPage() {
         <div className="grid grid-cols-3 gap-4 mb-6">
           {CLASSES.map(c => (
             <button key={c.k} onClick={() => { setClasse(classe === c.k ? '' : c.k); setPage(1); }}
-              className={`bg-white rounded-xl border p-4 text-left ${classe === c.k ? 'border-indigo-400 ring-1 ring-indigo-200' : 'border-gray-200'}`}>
+              className={`bg-white rounded-xl border p-4 text-left ${classe === c.k ? 'border-krv ring-1 ring-red-200' : 'border-gray-200'}`}>
               <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${c.cor}`}>{c.k}</span>
               <p className="text-2xl font-bold text-gray-900 mt-2">{qtdDe(c.k)}</p>
             </button>
