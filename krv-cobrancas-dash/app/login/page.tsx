@@ -53,28 +53,29 @@ export default function Login() {
 
   if (restaurando) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-indigo-600 to-purple-700 p-4">
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-charcoal to-black p-4">
         <div className="text-white/90 text-sm">Entrando…</div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-indigo-600 to-purple-700 p-4">
-      <form onSubmit={entrar} className="bg-white rounded-2xl shadow-xl p-8 w-full max-w-sm">
-        <h1 className="text-xl font-bold text-gray-900 mb-1">KRV — Cobranças</h1>
-        <p className="text-sm text-gray-500 mb-6">Acesso da equipe</p>
+    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-charcoal to-black p-4">
+      <form onSubmit={entrar} className="bg-white rounded-2xl shadow-xl p-8 w-full max-w-sm border-t-4 border-krv">
+        <img src="/krv-logo.png" alt="KRV Engenharia" className="h-14 mx-auto mb-5" />
+        <h1 className="text-xl font-bold text-gray-900 mb-1 text-center">Cobranças</h1>
+        <p className="text-sm text-gray-500 mb-6 text-center">Acesso da equipe KRV Engenharia</p>
         <input type="password" value={senha} onChange={(e) => setSenha(e.target.value)}
           placeholder="Senha" autoFocus
           className="w-full border rounded-lg px-3 py-2 mb-3 text-sm" />
         <label className="flex items-center gap-2 mb-3 text-sm text-gray-600 select-none cursor-pointer">
           <input type="checkbox" checked={lembrar} onChange={(e) => setLembrar(e.target.checked)}
-            className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500" />
+            className="h-4 w-4 rounded border-gray-300 text-krv focus:ring-krv" />
           Manter conectado neste computador (30 dias)
         </label>
         {erro && <div className="text-red-600 text-sm mb-3">{erro}</div>}
         <button type="submit" disabled={carregando}
-          className="w-full bg-indigo-600 text-white rounded-lg py-2 text-sm font-medium hover:bg-indigo-700 disabled:opacity-50">
+          className="w-full bg-krv text-white rounded-lg py-2 text-sm font-semibold hover:bg-krvdark disabled:opacity-50">
           {carregando ? 'Entrando...' : 'Entrar'}
         </button>
         <p className="text-[11px] text-gray-400 mt-4 leading-snug">
