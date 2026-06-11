@@ -30,7 +30,7 @@ export default function DevedoresLogin() {
           className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mb-3" autoFocus />
         {erro && <p className="text-sm text-red-600 mb-3">{erro}</p>}
         <button type="submit" disabled={carregando}
-          className="w-full px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 disabled:opacity-50">
+          className="w-full px-4 py-2 bg-krv text-white rounded-lg text-sm font-medium hover:bg-krvdark disabled:opacity-50">
           {carregando ? 'Entrando…' : 'Entrar'}
         </button>
       </form>
