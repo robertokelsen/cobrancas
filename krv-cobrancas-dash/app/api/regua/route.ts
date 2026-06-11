@@ -55,6 +55,12 @@ export async function PUT(req: NextRequest) {
       ativo: r.ativo !== false,
     }));
 
+  // Trava de segurança: nunca zerar a régua inteira por payload vazio
+  // (sessão expirada / bug de UI). Sem avisos = recusa, n8n continua cobrando.
+  if (cfgLimpo.length === 0 && atrLimpo.length === 0) {
+    return NextResponse.json({ error: 'Payload vazio — régua não foi alterada (proteção contra apagar tudo).' }, { status: 400 });
+  }
+
   const client = await cobrancasPool.connect();
   try {
     await client.query('begin');
