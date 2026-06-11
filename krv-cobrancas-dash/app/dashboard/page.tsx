@@ -212,8 +212,21 @@ export default function Dashboard() {
     else { setSort(key); setDir('asc'); }
   };
   const setaSort = (key: SortKey) => sort === key ? (dir === 'asc' ? ' ▲' : ' ▼') : '';
-  const cancelar = (b: Boleto) =>
-    window.open(`${N8N_BASE}/krv-boletos/${b.conta}/cancelar?id=${encodeURIComponent(b.codigo_solicitacao)}`, '_blank', 'noopener');
+  const [cancelando, setCancelando] = useState<string | null>(null);
+  const cancelar = async (b: Boleto) => {
+    const nome = b.nome?.split(' ')[0] || 'este cliente';
+    if (!window.confirm(`Cancelar o boleto de ${nome} (${brl(b.valor)}, venc. ${fmtData(b.vencimento)})?\n\nEsta ação é IRREVERSÍVEL no Banco Inter.`)) return;
+    setCancelando(b.codigo_solicitacao);
+    try {
+      const r = await fetch('/api/cancelar', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: b.codigo_solicitacao, conta: b.conta }),
+      });
+      if (r.ok) { mostrarToast('Cancelamento solicitado.'); carregar(); }
+      else mostrarToast('Falha ao cancelar.');
+    } catch { mostrarToast('Erro ao cancelar.'); }
+    finally { setCancelando(null); }
+  };
   const sair = async () => { await fetch('/api/logout', { method: 'POST' }); router.push('/login'); };
   const totalPaginas = Math.max(1, Math.ceil(total / pageSize));
 
@@ -646,7 +659,7 @@ export default function Dashboard() {
                             </>
                           )}
                           {PODE_CANCELAR(b.situacao) && (
-                            <button onClick={() => cancelar(b)} className="px-2 py-1.5 bg-red-50 text-red-600 rounded-lg text-xs font-medium hover:bg-red-100">Cancelar</button>
+                            <button disabled={cancelando === b.codigo_solicitacao} onClick={() => cancelar(b)} className="px-2 py-1.5 bg-red-50 text-red-600 rounded-lg text-xs font-medium hover:bg-red-100 disabled:opacity-50">{cancelando === b.codigo_solicitacao ? '...' : 'Cancelar'}</button>
                           )}
                         </div>
                       ) : <span className="text-gray-300 text-xs">—</span>}
