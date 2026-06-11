@@ -280,11 +280,11 @@ export default function Dashboard() {
       )}
       <div className="max-w-7xl mx-auto">
         <div className="flex items-center justify-between mb-6">
-          <h1 className="text-2xl font-bold text-gray-900">Boletos — Cobrança</h1>
+          <div className="flex items-center gap-3"><img src="/krv-logo.png" alt="KRV Engenharia" className="h-9" /><h1 className="text-2xl font-bold text-gray-900">Cobranças</h1></div>
           <div className="flex gap-2">
             <a href="/dashboard/regua" className="px-4 py-2 bg-white border border-gray-300 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-50">Régua</a>
             <a href="/dashboard/clientes" className="px-4 py-2 bg-white border border-gray-300 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-50">Clientes</a>
-            <button onClick={carregar} className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700">Atualizar</button>
+            <button onClick={carregar} className="px-4 py-2 bg-krv text-white rounded-lg text-sm font-medium hover:bg-krvdark">Atualizar</button>
             <button onClick={sair} className="px-4 py-2 bg-gray-100 text-gray-600 rounded-lg text-sm hover:bg-gray-200">Sair</button>
           </div>
         </div>
@@ -330,7 +330,7 @@ export default function Dashboard() {
           {projecao && (
             <div className={`bg-white rounded-xl shadow-sm p-4 ${silencio && silencio.qtd > 0 ? '' : 'md:col-start-3'}`}>
               <div className="text-xs text-gray-500 mb-1">Projeção — próximos 30 dias</div>
-              <div className="text-2xl font-bold text-indigo-700 tabular-nums">{brl(projecao.valor_30d)}</div>
+              <div className="text-2xl font-bold text-krv tabular-nums">{brl(projecao.valor_30d)}</div>
               <div className="text-xs text-gray-400 mt-1">{projecao.qtd_30d} boleto(s) a vencer</div>
             </div>
           )}
@@ -426,7 +426,7 @@ export default function Dashboard() {
                       <td className="py-2 text-gray-400">{idx + 1}</td>
                       <td className="py-2">
                         <button onClick={() => { setBusca(d.documento || d.nome); }}
-                          className="font-medium text-gray-900 hover:text-indigo-600 text-left">
+                          className="font-medium text-gray-900 hover:text-krv text-left">
                           {d.nome || '—'}
                         </button>
                         <div className="text-xs text-gray-400">{d.documento}</div>
@@ -449,7 +449,7 @@ export default function Dashboard() {
               <div className="flex items-center justify-between mb-1">
                 <label className="block text-xs text-gray-500">Empreendimentos (clique para filtrar; múltiplos)</label>
                 <div className="flex gap-2">
-                  <button onClick={() => { setContasSel(CONTAS.map(c => c.id)); setPage(1); }} className="text-xs text-indigo-600 hover:text-indigo-800">todos</button>
+                  <button onClick={() => { setContasSel(CONTAS.map(c => c.id)); setPage(1); }} className="text-xs text-krv hover:text-krvdark">todos</button>
                   <button onClick={() => { setContasSel([]); setPage(1); }} className="text-xs text-gray-400 hover:text-gray-600">nenhum</button>
                 </div>
               </div>
@@ -458,7 +458,7 @@ export default function Dashboard() {
                   const ativo = contasSel.includes(c.id);
                   return (
                     <button key={c.id} onClick={() => toggleConta(c.id)}
-                      className={`px-3 py-1.5 rounded-full text-xs font-medium border transition ${ativo ? 'bg-indigo-100 text-indigo-700 border-transparent' : 'bg-white text-gray-500 border-gray-200 hover:border-gray-300'}`}>
+                      className={`px-3 py-1.5 rounded-full text-xs font-medium border transition ${ativo ? 'bg-red-50 text-krv border-transparent' : 'bg-white text-gray-500 border-gray-200 hover:border-gray-300'}`}>
                       {c.nome}{ativo ? ' ✓' : ''}
                     </button>
                   );
