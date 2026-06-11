@@ -33,6 +33,8 @@ export async function GET(req: NextRequest) {
 
   const mesValido = /^\d{4}-\d{2}$/.test(mes);
   const mesVigente = new Date().toISOString().slice(0, 7); // YYYY-MM (mês corrente)
+  // mês de referência dos cards A Receber/Recebidos: o selecionado no filtro, senão o vigente
+  const mesRef = mesValido ? mes : mesVigente;
 
   // ---- WHERE da LISTA (todos os filtros) ----
   const cond: string[] = [];
@@ -87,7 +89,7 @@ export async function GET(req: NextRequest) {
     const whereM = condM.length ? `where ${condM.join(' and ')}` : '';
     // "A Receber" e "Recebidos" do card consideram o mês vigente (não o acumulado).
     // "Atrasados" segue o filtro de mês selecionado (ou todos).
-    const idxMesVig = j++; paramsM.push(mesVigente);
+    const idxMesVig = j++; paramsM.push(mesRef);
     // A Receber e Recebidos consideram o mês vigente; Atrasados é o acumulado.
     const metricas = await client.query(`
       select
@@ -227,7 +229,7 @@ export async function GET(req: NextRequest) {
       projecao: proj.rows[0],
       silencio: silencio.rows[0],
       mesesDisponiveis: meses.rows.map(r => r.mes),
-      mesVigente,
+      mesVigente, mesRef,
       total: totalRes.rows[0].total,
       page, pageSize, boletos: lista.rows,
     });
