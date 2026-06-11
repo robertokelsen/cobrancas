@@ -83,12 +83,12 @@ export default function ReguaPage() {
       <div className="max-w-4xl mx-auto">
         <div className="flex items-center justify-between mb-6">
           <div>
-            <a href="/dashboard" className="text-sm text-indigo-600 hover:underline">← Voltar ao dashboard</a>
+            <a href="/dashboard" className="text-sm text-krv hover:underline">← Voltar ao dashboard</a>
             <h1 className="text-2xl font-bold text-gray-900 mt-1">Régua de cobrança</h1>
             <p className="text-sm text-gray-500">Quando e por qual canal avisar, por tipo de cliente.</p>
           </div>
           <button onClick={salvar} disabled={salvando}
-            className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 disabled:opacity-50">
+            className="px-4 py-2 bg-krv text-white rounded-lg text-sm font-medium hover:bg-krvdark disabled:opacity-50">
             {salvando ? 'Salvando…' : 'Salvar régua'}
           </button>
         </div>
@@ -99,7 +99,7 @@ export default function ReguaPage() {
           <div className="flex flex-wrap gap-2 mb-5">
             {CLASSES.map(c => (
               <button key={c.k} onClick={() => setAba(c.k)}
-                className={`px-3 py-1.5 rounded-lg text-sm border ${aba === c.k ? 'border-indigo-400 bg-indigo-50 text-indigo-700' : 'border-gray-200 bg-white text-gray-600'}`}>
+                className={`px-3 py-1.5 rounded-lg text-sm border ${aba === c.k ? 'border-krv bg-red-50 text-krv' : 'border-gray-200 bg-white text-gray-600'}`}>
                 {c.k} ({avisos.filter(a => a.classificacao === c.k).length})
               </button>
             ))}
