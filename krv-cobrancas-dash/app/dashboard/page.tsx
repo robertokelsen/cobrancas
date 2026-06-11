@@ -133,6 +133,7 @@ export default function Dashboard() {
   const [silencio, setSilencio] = useState<Silencio | null>(null);
   const [meses, setMeses] = useState<string[]>([]);
   const [mesVigente, setMesVigente] = useState('');
+  const [mesRef, setMesRef] = useState('');
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
   const [erro, setErro] = useState('');
@@ -189,7 +190,7 @@ export default function Dashboard() {
       setAging(d.aging || null); setTopDevedores(d.topDevedores || []);
       setInadConta(d.inadConta || []); setResumo(d.resumoFiltro || null);
       setProjecao(d.projecao || null); setSilencio(d.silencio || null);
-      setMesVigente(d.mesVigente || ''); setTotal(d.total || 0);
+      setMesVigente(d.mesVigente || ''); setMesRef(d.mesRef || d.mesVigente || ''); setTotal(d.total || 0);
       setSelecionados(new Set());
     } catch (e: any) { setErro('Falha ao carregar. ' + (e?.message || '')); }
     finally { setLoading(false); }
@@ -440,10 +441,10 @@ export default function Dashboard() {
             {contasSel.length < CONTAS.length ? ` · ${contasSel.length} de ${CONTAS.length} empreendimentos` : ' · todos os empreendimentos'}
           </div>
           <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
-            <Card t={`A Receber (${mesVigente ? fmtMes(mesVigente) : 'mês'})`} cor="text-blue-700" q={metricas.a_receber} v={metricas.valor_a_receber} />
+            <Card t={`A Receber (${mesRef ? fmtMes(mesRef) : 'mês'})`} cor="text-blue-700" q={metricas.a_receber} v={metricas.valor_a_receber} />
             <Card t="Atrasados" cor="text-red-700" q={metricas.atrasado} v={metricas.valor_atrasado} />
             <Card t="Expirados" cor="text-orange-700" q={metricas.expirado} v={metricas.valor_expirado} />
-            <Card t={`Recebidos (${mesVigente ? fmtMes(mesVigente) : 'mês'})`} cor="text-green-700" q={metricas.recebido} v={metricas.valor_recebido} />
+            <Card t={`Recebidos (${mesRef ? fmtMes(mesRef) : 'mês'})`} cor="text-green-700" q={metricas.recebido} v={metricas.valor_recebido} />
             <div className="bg-white rounded-xl shadow-sm p-4">
               <div className="text-xs text-gray-500 mb-1">Inadimplência</div>
               <div className={`text-2xl font-bold ${inadimplencia > 20 ? 'text-red-600' : 'text-amber-600'}`}>
