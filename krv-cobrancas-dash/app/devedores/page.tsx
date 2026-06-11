@@ -48,16 +48,16 @@ export default function DevedoresPage() {
         <div className="flex items-center justify-between mb-2">
           <h1 className="text-2xl font-bold text-gray-900">Devedores — Manutenção</h1>
           <div className="flex gap-2">
-            <button onClick={carregar} className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700">Atualizar</button>
+            <button onClick={carregar} className="px-4 py-2 bg-krv text-white rounded-lg text-sm font-medium hover:bg-krvdark">Atualizar</button>
             <button onClick={sair} className="px-4 py-2 bg-gray-100 text-gray-600 rounded-lg text-sm hover:bg-gray-200">Sair</button>
           </div>
         </div>
         <p className="text-sm text-gray-500 mb-5">Unidades com boletos vencidos. Use para suspender manutenções enquanto houver pendência financeira.</p>
 
         <div className="flex flex-wrap gap-2 mb-5">
-          <button onClick={() => setConta('')} className={`px-3 py-1.5 rounded-lg text-sm border ${conta === '' ? 'border-indigo-400 bg-indigo-50 text-indigo-700' : 'border-gray-200 bg-white text-gray-600'}`}>Todos</button>
+          <button onClick={() => setConta('')} className={`px-3 py-1.5 rounded-lg text-sm border ${conta === '' ? 'border-krv bg-red-50 text-krv' : 'border-gray-200 bg-white text-gray-600'}`}>Todos</button>
           {CONTAS.map((c) => (
-            <button key={c} onClick={() => setConta(c)} className={`px-3 py-1.5 rounded-lg text-sm border ${conta === c ? 'border-indigo-400 bg-indigo-50 text-indigo-700' : 'border-gray-200 bg-white text-gray-600'}`}>
+            <button key={c} onClick={() => setConta(c)} className={`px-3 py-1.5 rounded-lg text-sm border ${conta === c ? 'border-krv bg-red-50 text-krv' : 'border-gray-200 bg-white text-gray-600'}`}>
               {NOME_CONTA[c]}
             </button>
           ))}
