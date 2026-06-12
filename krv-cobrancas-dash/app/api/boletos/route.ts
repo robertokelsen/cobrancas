@@ -105,7 +105,7 @@ export async function GET(req: NextRequest) {
 
     // ---- PIZZA: distribuição por VALOR do MÊS VIGENTE (respeita conta) ----
     const condP: string[] = [`to_char(vencimento,'YYYY-MM') = $1`];
-    const paramsP: any[] = [mesVigente]; let p = 2;
+    const paramsP: any[] = [mesRef]; let p = 2;
     if (contas.length) { condP.push(`conta = ANY($${p++})`); paramsP.push(contas); }
     const pizza = await client.query(`
       select
