@@ -347,7 +347,7 @@ export default function Dashboard() {
         </ComposedChart>
       </ResponsiveContainer>
     ) },
-    { id: 'distribuicao', title: 'Distribuição por situação (R$)', sub: (mesVigente ? fmtMes(mesVigente) : 'mês vigente') + ' · atrasado inclui expirados', body: (
+    { id: 'distribuicao', title: 'Distribuição por situação (R$)', sub: (mesRef ? fmtMes(mesRef) : 'mês vigente') + ' · atrasado inclui expirados', body: (
       <ResponsiveContainer width="100%" height="100%">
         <PieChart>
           <Pie data={dadosPie} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={80} label={(e:any)=>e.name}>
